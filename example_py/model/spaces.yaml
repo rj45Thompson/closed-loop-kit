@@ -1,0 +1,9 @@
+spaces:
+  - id: S1
+    title: the owner's rules
+    basis: prose
+    kind: list
+    cells:
+      PAYS_WHAT_IT_HOLDS: {text: "the wallet pays only what it holds", maps: [W-1]}
+      DISPLAY: {text: "the display holds eight digits", maps: [W-2]}
+      SELLS_OUT: {text: "a limited line sells out; an unlimited one never does", maps: [W-3]}

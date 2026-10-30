@@ -1,0 +1,10 @@
+actors:
+  - {id: A1, name: Player, kind: person, profile: "buys from a store with the money in their wallet"}
+  - {id: A2, name: Owner, kind: person, profile: "owns the store's rules and answers what only they can"}
+  - {id: SYS-GAME, name: The game, kind: system, profile: "the Wallet and Store classes"}
+
+sources:
+  - {id: OWNER, kind: quote, cite: "the example's owner, in the kit's README", text: "The wallet pays only what it holds; a limited line sells out and an unlimited one never does; the display holds eight digits."}
+
+questions:
+  - {id: Q1, persona: A1, text: "Can I afford this, and is any left?", inverse: UC-1}

@@ -1,0 +1,67 @@
+# The kit's Python example as a closed-loop model. Paths are relative to the kit (CLOSED_LOOP_ROOT).
+meta:
+  subject: a store's wallet in Python - the example every install runs the whole loop on when there is no .NET SDK
+  mode: greenfield
+  story:
+    text: A player buys from a store with the money in their wallet; nothing may take more than they hold, sell what is sold out, or show a number
+      the display cannot hold - and each of those rules must be caught by a test the moment its code is broken.
+    clauses:
+    - text: the wallet pays only what it holds
+      source: OWNER
+    - text: a limited line sells out; an unlimited one never does
+      source: OWNER
+  loop:
+    closed: true
+    code:
+      language: python
+      roots:
+      - example_py/shop.py
+      scope:
+      - shop.
+    tests:
+    - runner: py_selftest
+      test: example_py/shop_test.py
+      covers:
+      - example_py/shop.py
+    entry:
+    - name: money
+      why: 'the amount a wallet is made with: the caller''s, outside the model'
+    branches:
+      claims:
+      - method: shop.Wallet.__init__
+        reqs:
+        - W-2
+        why: a wallet starts within its display
+      - method: shop.Wallet.can_pay
+        reqs:
+        - W-1
+        why: pays only what it holds, never a negative price
+      - method: shop.Wallet.pay
+        reqs:
+        - W-1
+        why: the price taken, or refused
+      - method: shop.Store.__init__
+        reqs:
+        - W-3
+        why: an empty store
+      - method: shop.Store.stock
+        reqs:
+        - W-3
+        why: a line, its price and its quantity
+      - method: shop.Store.left
+        reqs:
+        - W-3
+        why: how many are left
+      - method: shop.Store.buy
+        reqs:
+        - W-3
+        why: sold out first, then the money; a limited line counts down
+    equivalent:
+    - mutant: 'shop.Store.buy@8a4000: comparison Gt to GtE (1)'
+      why: a line with none left returns 'sold out' two statements earlier, so `> 0` and `>= 0` differ only where the code never reaches
+      rests_on:
+      - shop.Store.buy
+    - mutant: 'shop.Wallet.__init__@4b480a: an argument made None (1)'
+      why: the error's words are for a programmer; no requirement names them
+    - mutant: 'shop.Wallet.pay@cc4408: an argument made None (1)'
+      why: the error's words are for a programmer; no requirement names them

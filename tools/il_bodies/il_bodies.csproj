@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- il_bodies: every method body's IL in a .NET assembly, hashed - the same output as il_bodies.ps1, built by the dotnet the C#
+       adapter already needs, so L19's equivalence proof no longer depends on PowerShell 7 (KT-5, 10-29: without pwsh the kit's
+       own example could not hold, on Windows too, where only Windows PowerShell 5.1 ships). No package: System.Reflection.Metadata
+       is part of .NET. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,40 @@
+requirements:
+- id: W-1
+  kind: authored
+  sources:
+  - OWNER
+  text: The wallet pays only what it holds, and never a negative price.
+  measure: shop_test.py
+  effect:
+  - branches: can_pay
+    at: shop.Wallet.pay
+  - sets: money
+    at: shop.Wallet.pay
+- id: W-2
+  kind: authored
+  sources:
+  - OWNER
+  text: A wallet holds from nothing up to what its eight-digit display can show.
+  measure: shop_test.py
+  effect:
+  - branches: money
+    at: shop.Wallet.__init__
+- id: W-3
+  kind: authored
+  sources:
+  - OWNER
+  text: A limited line sells its quantity and is then sold out; an unlimited line never runs out.
+  measure: shop_test.py
+  effect:
+  - sets: n
+    at: shop.Store.buy
+  - branches: n
+    at: shop.Store.buy
+- id: W-4
+  kind: inferred
+  why: nothing says what a refused purchase does to the stock
+  text: A purchase refused for money changes neither the wallet nor the stock.
+  measure: shop_test.py
+  effect:
+  - calls: pay
+    at: shop.Store.buy

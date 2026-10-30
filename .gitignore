@@ -1,0 +1,11 @@
+dist/
+example/kg/
+example/stats.jsonl
+example/CLOSED_LOOP.md
+example/**/bin/
+example/**/obj/
+example_py/kg/
+example_py/stats.jsonl
+example_py/CLOSED_LOOP.md*
+__pycache__/
+*.pyc

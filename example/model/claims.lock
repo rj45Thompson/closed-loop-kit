@@ -1,0 +1,10 @@
+# closed_loop.py: each method claim's fingerprint of its method's statements, and each equivalent's of the methods it
+# rests on, when they were pinned, and why. Never edit: --pin-claims "<why>" re-pins after a person read them.
+Store.Buy	86145be59a433093	the example's claims and equivalents as shipped
+Store.Left	fb159d95a5c868b3	the example's claims and equivalents as shipped
+Store.Stock	1fa02fd850e9c50d	the example's claims and equivalents as shipped
+Wallet.CanPay	7e1c03c78601f17e	the example's claims and equivalents as shipped
+Wallet.Pay	01c251716463899b	the example's claims and equivalents as shipped
+Wallet.Wallet	76a4a5eb2baf26b0	the example's claims and equivalents as shipped
+equiv:Store.Buy@6cda91:	boundary	> to >= (1) 86145be59a433093 the example's claims and equivalents as shipped
+equiv:Store.Buy@6cda91: boundary > to >= (1)	86145be59a433093	the example's claims and equivalents as shipped

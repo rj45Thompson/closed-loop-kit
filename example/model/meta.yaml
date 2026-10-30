@@ -1,0 +1,34 @@
+# The kit's example: a store's wallet, as a closed-loop model. Paths are relative to the kit (CLOSED_LOOP_ROOT). The installer runs
+#   closed_loop.py run example/model --out example/CLOSED_LOOP.md --note "the install's acceptance run"   (its claims.lock ships with it)
+# as its acceptance test: every statement of example/src/Wallet broken every way, each break run against example/tests.
+meta:
+  subject: a store's wallet - the example every install runs the whole loop on
+  mode: greenfield
+  story:
+    text: >-
+      A player buys from a store with the money in their wallet; nothing may take more than they hold, sell what is sold out, or show
+      a number the display cannot hold - and each of those rules must be caught by a test the moment its code is broken.
+    clauses:
+      - {text: "the wallet pays only what it holds", source: OWNER}
+      - {text: "a limited line sells out; an unlimited one never does", source: OWNER}
+  loop:
+    closed: true
+    code:
+      roots: [example/src/Wallet]
+    tests:
+      - {runner: dotnet, test: example/tests/Wallet.Tests/Wallet.Tests.csproj, root: example, covers: [example/src/Wallet]}
+    entry:
+      - {name: CanPay, why: "the wallet's own answer, claimed by W-1"}
+      - {name: money, why: "the amount a wallet is made with: the caller's, outside the model"}
+    equivalent:
+      - {mutant: "Store.Buy@6cda91: boundary > to >= (1)", why: "a line with none left returns SoldOut two statements earlier, so `> 0` and `>= 0` differ only where the code never reaches", rests_on: [Store.Buy]}
+      - {mutant: "Wallet.Pay@583fa7: InvalidOperationException's argument 1 made default", why: "the exception's words are for a programmer; no requirement names them"}
+      - {mutant: "Wallet.Wallet@82a48e: ArgumentOutOfRangeException's argument 1 made default", why: "the exception's words are for a programmer; no requirement names them"}
+    branches:
+      claims:
+        - {method: Wallet.Wallet, reqs: [W-2], why: "a wallet starts within its display"}
+        - {method: Wallet.CanPay, reqs: [W-1], why: "pays only what it holds, never a negative price"}
+        - {method: Wallet.Pay, reqs: [W-1], why: "the price taken, or refused"}
+        - {method: Store.Stock, reqs: [W-3], why: "a line and its quantity"}
+        - {method: Store.Left, reqs: [W-3], why: "how many are left"}
+        - {method: Store.Buy, reqs: [W-3], why: "sold out first, then the money; a limited line counts down (W-4 owns its effect only: a method claim makes a requirement answer for every statement)"}

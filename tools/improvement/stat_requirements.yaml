@@ -1,0 +1,50 @@
+# The closed loop's IMPROVEMENT requirements: requirements for making the loop better, not for the software it checks.
+# The rule (2026-10-29): a stat may be recorded without a reader only if a reader will read it later, and a stat should trigger
+# something. These requirements are a subsystem that determines improvement, apart from the requirements for software.
+#
+# Each entry is one requirement on one stat: WHAT pattern in it fires (trigger), WHAT then happens (action: a NextImprovement area,
+# a run_plan switch, or an item for the board), and WHY the stat is kept. improvement.py evaluates every trigger on the latest passes
+# each tick; a fired trigger no tick has targeted since its pass IS an item. telemetry_audit.py counts a stat as covered when code acts on it OR a requirement here does.
+# A BANKED record is kept for a learner that does not exist yet: it names that learner's board item and a date; past the date,
+# unread, it fails the audit (read it or stop recording it).
+#
+# Trigger forms: above/below <n> (the last pass), nonzero, rises/falls <n> (strictly, over the last n passes), stalled <n>
+# (unchanged over the last n passes), null (the recorder wrote nothing: the stat is not being measured), key_zero {passes, min}
+# (a dict's keys that stayed 0 over the last passes while the dict's total is at least min), names (what the stat names, e.g. its
+# largest key, CHANGED from the pass before; a trigger that fires whenever the stat exists says nothing and can never be ended).
+requirements:
+  - {id: IMP-1, stat: holes, trigger: {names: largest}, action: {area: tests}, why: "the criterion with the most holes of ours is where the next test goes; the pick names it"}
+  - {id: IMP-2, stat: chain, trigger: {key_above: {key: ungrounded, n: 0}}, action: {item: "a chain step cites nothing the graph holds: ground it or drop the claim"}, why: "an argument with an ungrounded step is not an argument"}
+  - {id: IMP-3, stat: survivors_by_operator, trigger: {rises: 2}, action: {area: tests}, why: "a kind of break getting past the tests more each pass is a test gap growing"}
+  - {id: IMP-4, stat: kills_by_operator, trigger: {key_zero: {passes: 3, min: 100}}, action: {item: "a kind of break never caught in 3 passes, with 100+ breaks made: it may not apply to this code - a fast pass can skip it (run_plan), the full pass keeps it"}, why: "a break that never applies costs time and finds nothing"}
+  - {id: IMP-5, stat: test_kills_top, trigger: {names: top}, action: {switch: "break order"}, why: "the tests that catch the most breaks run first in a fast pass, and are the plain rule for GN-2 (popular)"}
+  - {id: IMP-6, stat: assumptions_by_kind, trigger: {rises: 2}, action: {area: assumptions}, why: "assumptions growing pass on pass (declared equivalents, entry conditions, inferred requirements) are claims nobody checked"}
+  - {id: IMP-7, stat: graph_by_kind, trigger: {names: largest}, action: {item: "the graph's largest kind of node changed: read its growth by kind (PeriodicReport.growth, in the report and in trends): did the model grow, or only the measurements?"}, why: "which kinds of node the graph grows in tells whether the model or only the measurements grow"}
+  - {id: IMP-8, stat: tests_idle, trigger: {above: 0}, action: {area: speed}, why: "a test that catches no break costs every pass: give it a requirement to check or remove it"}
+  - {id: IMP-9, stat: equivalent_lapsed, trigger: {above: 0}, action: {area: tests}, why: "a lapsed equivalent is a survivor again: a hole of ours"}
+  - {id: IMP-10, stat: equivalent_declared, trigger: {rises: 2}, action: {item: "declared equivalents rising two passes running: the owner reviews each reason (excuses grow where tests should)"}, why: "a reason is weaker than compiled proof; their share should not grow"}
+  - {id: IMP-11, stat: equivalent_tce, trigger: {falls: 2}, action: {item: "fewer breaks proven equivalent by compiled code two passes running: check the IL reader still runs"}, why: "the proof by compiled code is the cheapest truth the loop has; a fall is a tool fault first"}
+  - {id: IMP-12, stat: effects_with_survivor, trigger: {null: true}, action: {item: "the recorder writes effects_with_survivor as null: fix PassStats or stop recording it"}, why: "a stat recorded as null measures nothing"}
+  - {id: IMP-13, stat: facets_never_asked, trigger: {above: 0}, action: {area: questions}, why: "who/what/why/when/where/before/after never asked at a level is a question the model owes"}
+  - {id: IMP-14, stat: facets_answered, trigger: {falls: 1}, action: {area: questions}, why: "answers lost between passes are a model edit that dropped them"}
+  - {id: IMP-15, stat: may_widest, trigger: {names: value}, action: {area: owner}, why: "the may with the widest blast radius is the owner's first question"}
+  - {id: IMP-16, stat: claims, trigger: {falls: 1}, action: {item: "a method claim disappeared: a claimed branch is now nobody's"}, why: "claims only fall when someone removed one"}
+  - {id: IMP-17, stat: decisions_claimed, trigger: {null: true}, action: {item: "the recorder writes decisions_claimed as null: fix PassStats or stop recording it"}, why: "a stat recorded as null measures nothing"}
+  - {id: IMP-18, stat: musts, trigger: {stalled: 3}, action: {area: owner}, why: "musts unchanged for 3 passes while mays stand: the owner is not settling questions"}
+  - {id: IMP-19, stat: graph_nodes, trigger: {stalled: 3}, action: {item: "the graph did not grow for 3 passes: the model is not being seeded (seed it first, then it flies)"}, why: "the GNN pays only on a full enough graph (PK-3); a graph that stops growing stops the GNN paying"}
+  - {id: IMP-20, stat: graph_edges, trigger: {stalled: 3}, action: {item: "the graph's links did not grow for 3 passes"}, why: "as graph_nodes"}
+  - {id: IMP-21, stat: kill_rate, trigger: {falls: 1}, action: {area: tests}, why: "a share of breaks caught that falls is tests left behind by new code"}
+  - {id: IMP-22, stat: killed, trigger: {falls: 2}, action: {area: tests}, why: "fewer breaks caught two passes running"}
+  - {id: IMP-23, stat: mutants, trigger: {falls: 2}, action: {item: "fewer breaks made two passes running: the covered code or the operators shrank - check it was meant"}, why: "the net should not shrink by accident"}
+  - {id: IMP-24, stat: seconds, trigger: {rises: 3}, action: {area: speed}, why: "a pass slower three times running"}
+  - {id: IMP-25, stat: tool_lines, trigger: {rises: 3}, action: {item: "the tools grew three passes running: did a stat improve? if not, the growth is complexity without return"}, why: "code added must buy a measured gain"}
+  - {id: IMP-26, stat: use_cases, trigger: {stalled: 5}, action: {item: "no new use case in 5 passes while requirements grew: a requirement with no use case carrying it"}, why: "requirements bind into chains; one outside a chain infers nothing"}
+  - {id: IMP-27, stat: decisions_pinned, trigger: {falls: 1}, action: {area: tests}, why: "a branch that was held by a test is held no more"}
+  - {id: IMP-28, stat: effects_killed, trigger: {falls: 1}, action: {area: tests}, why: "an effect whose breaks were all caught has a survivor now"}
+  - {id: IMP-29, stat: equivalent_declared_share, trigger: {above: 0.5}, action: {item: "more than half the equivalents rest on a reason, not on compiled proof: the owner reviews them"}, why: "derived: declared over declared plus proven", derived: {ratio: [equivalent_declared, [equivalent_declared, equivalent_tce]]}}
+  - {id: IMP-30, stat: effects, trigger: {falls: 1}, action: {item: "an effect left the model: a requirement no longer says what it does - check it was meant"}, why: "effects only fall when someone removed one, and effects_killed can hold steady while the count behind it shrinks"}
+  - {id: IMP-31, stat: pillar_top3_share, trigger: {rises: 2}, action: {item: "the top 3 requirements' share of the owned code rose two passes running: read the newest claims on them (P5-E pinned code on a nearby requirement and the blind grader marked it down), and split one that owns most of the code (SD-4)"}, why: "code piling onto the requirements that already own the most is how a hole count gets satisfied without the intent being met"}
+  - {id: IMP-32, stat: pillars_80, trigger: {falls: 2}, action: {item: "fewer requirements hold 80% of the owned code two passes running: as IMP-31, read the newest claims on the largest"}, why: "the same concentration seen from the long tail: it can fall while the top 3's share holds"}
+banked:
+  - {record: cochange.jsonl, for: "GN-6 changed together", until: "2026-12-31", why: "method-level co-change history does not exist before 10-29; a learner needs at least 10 intervals"}
+  - {record: impact.jsonl, for: "GN-3 impact before the run", until: "2026-12-31", why: "the ground truth an impact predictor will be scored on; it accrues one row per measured change"}

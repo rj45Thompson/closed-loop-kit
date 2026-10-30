@@ -1,0 +1,5 @@
+requirements:
+  - {id: W-1, kind: authored, sources: [OWNER], text: "The wallet pays only what it holds, and never a negative price.", measure: "WalletTests", effect: [{branches: CanPay, at: Wallet.Pay}, {sets: Money, at: Wallet.Pay}]}
+  - {id: W-2, kind: authored, sources: [OWNER], text: "A wallet holds from nothing up to what its eight-digit display can show.", measure: "WalletTests", effect: [{branches: money, at: Wallet.Wallet}]}
+  - {id: W-3, kind: authored, sources: [OWNER], text: "A limited line sells its quantity and is then sold out; an unlimited line never runs out.", measure: "WalletTests", effect: [{branches: Left, at: Store.Buy}]}
+  - {id: W-4, kind: inferred, why: "nothing says what a refused purchase does to the stock", text: "A purchase refused for money changes neither the wallet nor the stock.", measure: "WalletTests", effect: [{calls: Pay, at: Store.Buy}]}

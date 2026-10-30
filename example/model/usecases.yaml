@@ -1,0 +1,63 @@
+usecases:
+  - id: EPIC-1
+    name: Buy what the wallet can pay for
+    level: kite
+    actor: A2
+    trigger: "the owner wants the store's rules held by tests"
+    pre: "the store is stocked"
+    minimal: "a refused purchase changes nothing"
+    success: "every rule of the wallet and the store is caught by a test the moment its code breaks"
+    why: "the example every install runs the loop on"
+    where: "Wallet, Store"
+    gulf:
+      exec: {text: "the owner stocks the store", reqs: [W-3]}
+      eval: {text: "the loop's report", reqs: [W-1]}
+    steps:
+      - {do: "The store is stocked", reqs: [W-3], includes: [UC-2]}
+      - {do: "The player buys", reqs: [W-1, W-3], includes: [UC-1]}
+      - {do: "The wallet shows what is left", reqs: [W-2], includes: [UC-1]}
+    ext:
+      - {at: 2, when: "the player cannot pay", do: ["nothing changes"], out: rejoin 3, reqs: [W-4]}
+
+  - id: UC-1
+    name: Buy one item
+    level: sea
+    parent: {uc: EPIC-1, step: 2}
+    actor: A1
+    trigger: "the player picks a line"
+    pre: "the wallet holds money"
+    minimal: "a refused purchase changes nothing"
+    success: "the price is taken and the stock counts down"
+    why: "the store's one job"
+    where: "Store.Buy, Wallet.Pay"
+    gulf:
+      exec: {text: "the player confirms", reqs: [W-1]}
+      eval: {text: "the money and what is left", reqs: [W-2, W-3]}
+    steps:
+      - {do: "A sold-out line is refused", reqs: [W-3]}
+      - {do: "A line the wallet cannot pay is refused and nothing changes", reqs: [W-1, W-4]}
+      - {do: "The price is taken and a limited line counts down", reqs: [W-1, W-3]}
+      - {do: "The wallet never holds more than its display", reqs: [W-2]}
+    ext:
+      - {at: 3, when: "the line is unlimited", do: ["it does not count down"], out: end success, reqs: [W-3]}
+
+  - id: UC-2
+    name: Stock the store
+    level: sea
+    parent: {uc: EPIC-1, step: 1}
+    actor: A2
+    trigger: "the owner adds a line"
+    pre: "the store exists"
+    minimal: "a line is stocked or not at all"
+    success: "the line is on sale with its price and its quantity"
+    why: "what the store sells"
+    where: "Store.Stock, Store.Left"
+    gulf:
+      exec: {text: "Stock(item, price, quantity)", reqs: [W-3]}
+      eval: {text: "Left(item)", reqs: [W-3]}
+    steps:
+      - {do: "The owner stocks a line with its price and its quantity", reqs: [W-3]}
+      - {do: "How many are left reads back", reqs: [W-3]}
+      - {do: "A line never stocked has none left", reqs: [W-3]}
+    ext:
+      - {at: 1, when: "the quantity is -1", do: ["the line never runs out"], out: rejoin 2, reqs: [W-3]}
