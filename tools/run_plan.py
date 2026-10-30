@@ -2,9 +2,13 @@
 """run_plan.py - which parts of the loop run for a model, decided by the measured evidence, never by habit.
 
 WHY (2026-10-29): what is better not run is disabled for the run, and a graph too small for a part does not run it, both decided
-from the data. Every learned part has a plain rule it must beat (graph_gnn's rankers, the KILLS rule, the operator prior). The PASS
-(exploit) runs a learned part only where the evidence says it wins by more than MARGIN; elsewhere the plain rule does the job. The
-epoch BENCHMARK (explore, TICK.md 4b) still measures every part on every model, so the data can turn a part back on.
+from the data. Every learned part has a plain rule it must beat (graph_gnn's rankers, the KILLS rule, the operator prior). The epoch
+BENCHMARK (explore) still measures every part on every model, so the data can turn a part back on.
+
+A LINE IS A SWITCH ONLY IF A PASS ACTS ON IT (PlanLine, measured 2026-10-30: this header said a pass obeyed all seven lines, and no
+tool a pass runs named this file, so two lines flipping by seed alone changed nothing). `closed_loop.py run --gnn` reads `gnn owner`
+and both `relation` lines before it rebuilds the graph. The other lines are MEASURED ONLY: `on` is None, `wins` holds what the evidence
+says, `why` names what would have to read them. telemetry_audit.py fails a switch no pass reads.
 
 THE EVIDENCE it reads (each written by the tool that measured it; nothing here is assumed):
   <kg>/gnn_tasks.jsonl       gnn_tasks.py eval: each job's learned score against its best plain rule, and the size of the graph it
@@ -31,6 +35,35 @@ MARGIN = 0.02
 MIN_SURVIVORS = 20          # the learned break order is trusted only when it learned from at least this many survivors
 OWNER_VARIANTS = ("owner + calls", "owner + caught by", "owner + both")     # gnn_tasks' jobs: the owner GNN hearing an added relation
 AB = os.path.join(os.path.expanduser("~"), ".claude", "ab")
+
+
+class PlanLine(object):
+    """One line of the plan: the evidence it rests on, and whether a pass acts on it. Without `waits` the line is a SWITCH: its `on` is
+    what a pass does, and telemetry_audit.PlanReaders must find a tool of the pass reading it by name, or the audit fails. With `waits`
+    it is MEASURED ONLY: a score with nothing behind it to obey, so `on` is None and `wins` says what the evidence says; `waits` names
+    the reader it would take. A stat that only feeds a measured line is WATCHED, however often it is read here: a plan that nobody reads
+    decides nothing. Breadcrumb: the evidence names are `<field>` of `<record>.jsonl` as telemetry_audit spells them."""
+
+    def __init__(self, name, evidence, waits=None):
+        self.name, self.evidence, self.waits = name, evidence, waits
+
+    def rests_on(self, record, field):
+        return field in self.evidence.get(record, ())
+
+
+SHAPE = ("shape.nodes", "shape.edges", "shape.methods", "shape.owner_links", "shape.requirements")     # GraphEvidence.SIZE, as the audit names them
+LINES = (
+    PlanLine("gnn owner", {"gnn_tasks": ("jobs.owner as today",) + tuple("jobs." + v for v in OWNER_VARIANTS) + SHAPE,
+                           "gnn_curve": ("gnn", "best_mrr", "best", "requirements")}),
+    PlanLine("relation caught by", {"gnn_tasks": ("jobs.owner + caught by",) + SHAPE}),
+    PlanLine("relation calls", {"gnn_tasks": ("jobs.owner + calls",) + SHAPE}),
+    PlanLine("gnn tests", {"gnn_tasks": ("jobs.tests",) + SHAPE}, waits="a pass that runs the tests likely to catch a break first"),
+    PlanLine("gnn steps", {"gnn_tasks": ("jobs.steps",) + SHAPE}, waits="a prompt that suggests the steps for a new requirement"),
+    PlanLine("equivalent ranking", {"gnn_tasks": ("jobs.equivalent",) + SHAPE},
+             waits="a report that lists survivors likeliest equivalent first, once its positives include survivors a person reads"),
+    PlanLine("break order", {"survivor_rank": ("breaks", "survived", "recall20.learned", "recall20.operator prior", "recall20.random")},
+             waits="a fast pass that runs the breaks likeliest to survive first"),
+)
 
 
 class GraphEvidence(object):
@@ -90,7 +123,7 @@ def curve_verdict(kg, roots):
     g = sum(x["gnn"] for x in found) / len(found)
     b = sum(x["best_mrr"] for x in found) / len(found)
     return {"on": wins, "why": "the fullness curve, every claim seen, %d seed(s): GNN %.2f against %s %.2f (%s)" % (
-        len(found), g, found[-1].get("best"), b, "wins at every seed" if wins else "does not win at every seed: the plain rule runs")}
+        len(found), g, found[-1].get("best"), b, "wins at every seed" if wins else "does not win at every seed: it stays off")}
 
 
 def size_floor(task_rows, curve_rows=()):
@@ -120,19 +153,19 @@ def decide(kg, roots=(HERE,), ab=AB):
     moved = GraphEvidence(kg, last).moved()
 
     def stale(what):
-        return {"on": False, "why": "%s: measured on a graph that has changed since (%s): gnn_tasks.py eval measures it again; until then the plain rule" % (what, moved)}
+        return {"on": False, "why": "%s: measured on a graph that has changed since (%s): gnn_tasks.py eval measures it again; until then it stays off" % (what, moved)}
 
     def job(name, part, what):
         j = (last or {}).get("jobs", {}).get(name)
         if j is None:
-            plan[part] = {"on": False, "why": "no evidence for %s on this model yet: the benchmark measures it; until then the plain rule" % what}
+            plan[part] = {"on": False, "why": "no evidence for %s on this model yet: gnn_tasks.py eval measures it; until then it stays off" % what}
         elif moved:
             plan[part] = stale(what)
         elif j.get("wins") is None:
             plan[part] = {"on": False, "why": "not measurable here: %s" % j.get("why")}
         else:
             plan[part] = {"on": bool(j["wins"]), "why": "%s: learned %.2f against %s %.2f (%s)" % (
-                what, j["learned"], j["best_plain"], j["plain"], "wins by more than %.2f" % MARGIN if j["wins"] else "does not win: the plain rule runs")}
+                what, j["learned"], j["best_plain"], j["plain"], "wins by more than %.2f" % MARGIN if j["wins"] else "does not win: it stays off")}
 
     # the model's OWN evidence decides first; the size floor speaks only for a model not measured yet
     curve = curve_verdict(kg, roots)
@@ -145,8 +178,10 @@ def decide(kg, roots=(HERE,), ab=AB):
     # the owner GNN runs in its BEST winning form: if hearing a new relation is what makes it win, it runs hearing that relation
     # (10-29: on the self model the GNN as it is lost, 0.70 to 0.72, and with `calls` won, 0.74 - the plan had switched it off)
     variants = [(n, j) for n, j in ((n, (last or {}).get("jobs", {}).get(n)) for n in OWNER_VARIANTS) if j and j.get("wins")]
+    needs = ()
     if variants and not moved and not plan.get("gnn owner", {}).get("on"):
         n, j = max(variants, key=lambda v: v[1]["learned"])
+        needs = ("caught by", "calls") if n == "owner + both" else (n.replace("owner + ", ""),)
         plan["gnn owner"] = {"on": True, "why": "the owner GNN %s: learned %.2f against %s %.2f (wins only hearing the added relation%s)" % (
             n.replace("owner + ", "hearing `").rstrip() + "`", j["learned"], j["best_plain"], j["plain"], "s" if n == "owner + both" else "")}
     for rel, key in (("caught by", "owner + caught by"), ("calls", "owner + calls")):
@@ -158,7 +193,9 @@ def decide(kg, roots=(HERE,), ab=AB):
         else:
             gain = j.get("adds_over_today", 0.0)
             plan["relation " + rel] = {"on": bool(j["wins"]) and gain > MARGIN, "why": "hearing `%s` moves the owner GNN by %+.2f%s" % (
-                rel, gain, "" if gain > MARGIN else " (not more than %.2f: left out)" % MARGIN)}
+                rel, gain, ("" if j["wins"] else " (the GNN still does not win: left out)") if gain > MARGIN else " (not more than %.2f: left out)" % MARGIN)}
+    for rel in needs:         # the win above was measured hearing this relation, so the pass must hear it whatever its gain alone
+        plan["relation " + rel] = {"on": True, "why": "the owner GNN wins only hearing `%s`" % rel}
     job("tests", "gnn tests", "which tests catch a branch's breaks")
     job("steps", "gnn steps", "which steps carry a requirement")
     job("equivalent", "equivalent ranking", "which survivors are likely equivalent")
@@ -170,9 +207,13 @@ def decide(kg, roots=(HERE,), ab=AB):
         r = sr[-1]["recall20"]
         on = r["learned"] > r["operator prior"] + MARGIN and r["learned"] > r["random"] + MARGIN
         plan["break order"] = {"on": on, "why": "the learned order finds %.0f%% of survivors in the first fifth against the operator prior's %.0f%% (%s)" % (
-            100 * r["learned"], 100 * r["operator prior"], "learned order" if on else "the operator prior orders the breaks")}
+            100 * r["learned"], 100 * r["operator prior"], "ahead by more than %.2f" % MARGIN if on else "not ahead by more than %.2f" % MARGIN)}
     else:
         plan["break order"] = {"on": False, "why": "no evidence: the breaks run in their plain order"}
+    for line in LINES:
+        if line.waits:      # the evidence stands; there is nothing to switch until something reads it
+            said = plan[line.name]
+            plan[line.name] = {"on": None, "wins": bool(said["on"]), "why": "%s; measured only, no pass acts on this line: it would take %s" % (said["why"], line.waits)}
     plan["when to use the loop"] = when_to_use(ab)
     return plan
 
@@ -263,13 +304,13 @@ def selftest():
     io.open(os.path.join(t, "ab", "results.jsonl"), "w", encoding="utf-8").write(json.dumps({"run": "P-1", "better": "off"}) + "\n")
     pb = decide(big, roots=(t,), ab=os.path.join(t, "ab"))
     ps = decide(small, roots=(t,), ab=os.path.join(t, "ab"))
-    good = pb["gnn owner"]["on"] and pb["relation caught by"]["on"] and not pb["relation calls"]["on"] and not pb["gnn tests"]["on"] \
-        and pb["gnn steps"]["on"] is False and "too small" in pb["gnn steps"]["why"] and pb["break order"]["on"] \
-        and not pb["equivalent ranking"]["on"] and "no evidence" in pb["equivalent ranking"]["why"]
+    good = pb["gnn owner"]["on"] and pb["relation caught by"]["on"] and not pb["relation calls"]["on"] and not pb["gnn tests"]["wins"] \
+        and pb["gnn steps"]["wins"] is False and "too small" in pb["gnn steps"]["why"] and pb["break order"]["wins"] \
+        and not pb["equivalent ranking"]["wins"] and "no evidence" in pb["equivalent ranking"]["why"]
     pm = decide(mid, roots=(t,), ab=os.path.join(t, "ab"))
     good = good and not ps["gnn owner"]["on"] and "too small: 4 requirements" in ps["gnn owner"]["why"] and "6 or more" in ps["gnn owner"]["why"]
     good = good and pm["gnn owner"]["on"]          # its own winning evidence beats any floor
-    good = good and not ps["break order"]["on"] and "too few examples: 3 survivors" in ps["break order"]["why"]
+    good = good and not ps["break order"]["wins"] and "too few examples: 3 survivors" in ps["break order"]["why"]
     var = os.path.join(t, "var", "kg")
     os.makedirs(var)
     io.open(os.path.join(var, "gnn_tasks.jsonl"), "w", encoding="utf-8").write(json.dumps(dict(real_graph(var, 20), jobs={
@@ -282,6 +323,16 @@ def selftest():
         "owner as today": lose, "owner + both": win})) + "\n")
     pboth = decide(both, roots=(t,), ab=os.path.join(t, "ab"))
     good = good and pboth["gnn owner"]["on"] and "both" in pboth["gnn owner"]["why"]
+    # A SWITCH IS WHAT A PASS DOES: a win hearing a relation turns on the relation it was measured hearing, even with no gain written alone
+    heard = pboth["relation calls"]["on"] and pboth["relation caught by"]["on"] and pv["relation calls"]["on"] and not pv["relation caught by"]["on"]
+    # A MEASURED LINE HAS NOTHING TO SWITCH: on is None even where its evidence wins, and it says what it waits for; a switch is True or False
+    lines = {l.name: l for l in LINES}
+    measured = pb["break order"]["on"] is None and pb["break order"]["wins"] is True and "no pass acts" in pb["break order"]["why"] \
+        and all(pb[n]["on"] is None and lines[n].waits in pb[n]["why"] for n, l in lines.items() if l.waits) \
+        and all(pb[n]["on"] in (True, False) and "wins" not in pb[n] for n, l in lines.items() if not l.waits)
+    print("selftest: LINES a win hearing a relation turns that relation on; a line no pass reads is measured only, on None, its evidence in wins "
+          "and what it waits for in its reason; a switch is on or off %s" % ("PASS" if heard and measured else "FAIL"))
+    good = good and heard and measured
     # THE EVIDENCE IS ABOUT ITS GRAPH: one requirement added, one claim taken away, or the graph gone, and nothing learned runs on it
     change_graph(mid, "INSERT INTO entity VALUES ('req:R-new', 'requirement', 'R-new', 'authored')")
     pm2 = decide(mid, roots=(t,), ab=os.path.join(t, "ab"))

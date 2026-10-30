@@ -61,7 +61,8 @@ RUNS = ("closed_loop.py run", "graph_gnn.py tune", "ab_loop.py outcome", "py_eff
 
 
 def running(procs=None):
-    """the command lines of the runs alive now"""
+    """the command lines of the runs alive now. A launch asking to start a run names it on its own command line, and so do the launcher and
+    shell above it: measured 10-30, `launch -- ... closed_loop.py run ...` answered BUSY to itself, so no pass could ever be launched"""
     if procs is None:
         import psutil
         procs = []
@@ -70,7 +71,7 @@ def running(procs=None):
                 procs.append(" ".join(p.info.get("cmdline") or []))
             except Exception:  # noqa: BLE001 - a process that ended while it was read is simply not there
                 continue
-    return [c for c in procs if any(r in c.replace("\\", "/") for r in RUNS)]
+    return [c for c in procs if "loop_tick.py launch" not in c.replace("\\", "/") and any(r in c.replace("\\", "/") for r in RUNS)]
 
 
 def _rows(path):
@@ -259,6 +260,11 @@ def selftest():
     ok &= good
     print("selftest: TICK a live lock stops a second tick, a stale one does not; a run or a busy CPU makes a LIGHT tick; finish "
           "writes one ledger row and frees the lock %s" % ("PASS" if good else "FAIL"))
+    asking = "py.exe -X utf8 tools\\loop_tick.py launch -- py -X utf8 -u tools/closed_loop.py run shops/model"
+    working = "python -X utf8 tools\\loop_tick.py _run t.log -- py -X utf8 -u tools/closed_loop.py run shops/model"
+    good = running([asking]) == [] and running([asking, working]) == [working] and running(["python closed_loop.py run m"]) != []
+    ok &= good
+    print("selftest: LAUNCH a launch asking to start a pass is not that pass, though it names it; a launched run and a pass run by hand each are %s" % ("PASS" if good else "FAIL"))
     io.open(stop, "w").write("owner")
     rc5, said5 = start(lock, now=9000.0, procs=[], cpu=5.0, stop=stop, runs_log=rl, alive=none, ledger=ledger, here=t, watch=w, hold=os.path.join(t, "no_hold"))
     good = rc5 == 4 and said5.startswith("STOPPED") and not os.path.exists(lock)

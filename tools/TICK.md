@@ -39,7 +39,7 @@ Measure the stat with one command, change one thing, measure with the same comma
 ## 5. Benchmark, at the end of an epoch
 
     py -X utf8 <tools>/gnn_tasks.py eval <graph.sqlite>    needs PyTorch: does each learned part beat its plain rule here?
-    py -X utf8 <tools>/run_plan.py <model> --write         which parts run on this project, on its own evidence
+    py -X utf8 <tools>/run_plan.py <model> --write         which learned parts a pass runs here, on this project's own evidence, and which are only measured
     py -X utf8 <tools>/improvement.py graph <model>        did the improvements work?
 
 ## 6. Finish

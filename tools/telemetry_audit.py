@@ -5,7 +5,7 @@ WHY (2026-10-29): a stat nobody looks at is data gathered and not used, so the p
 closed loop's own rule, turned on its telemetry: every recorded value is traced to what reads it.
 
 Each stat, in each record the loop writes, gets one verdict:
-  DECIDES   code reads it and it changes what runs next (the stats' pick of the next area, run_plan's switches, the idle rule)
+  DECIDES   code reads it and it changes what runs next (the stats' pick of the next area, a run_plan line a pass acts on, the idle rule)
   WATCHED   it is trended or printed, and nothing acts on it
   BANKED    training data kept for a learner that does not exist yet; it must name the board item that will read it
   UNREAD    nothing reads it - exit 1: give it a reader, or stop recording it
@@ -13,7 +13,8 @@ Each stat, in each record the loop writes, gets one verdict:
 A consumer is found by READING a tool's source for the stat's quoted name, never by a list here that could drift; only BANKED and
 IDENTITY are declared, each with its reason. A name counts as read only in a tool that names the record's FILE (a word another record
 happens to share is no reader), and never in a selftest's fixture or where the code WRITES it (ReaderCode): 10-30 the audit reported
-6 UNREAD while 11 were, because its own plants, the recorder and an area's name all passed for readers.
+6 UNREAD while 11 were, because its own plants, the recorder and an area's name all passed for readers. Read by run_plan is one hop
+short: it counts only for a line of the plan a pass acts on (PlanReaders). A switch no pass reads fails the audit.
 
     python -X utf8 telemetry_audit.py [--root DIR]     the audit (exit 1 while any stat is UNREAD)
     python -X utf8 telemetry_audit.py --selftest
@@ -38,6 +39,8 @@ BANKED = {"cochange.jsonl": "GN-6 changed together", "impact.jsonl": "GN-3 impac
 # the tools a record's reader can be: those that act on it, and those that only trend or print it (a tool counts for a record only
 # when it names that record's file)
 ACTING, SHOWING = ("run_plan.py", "loop_tick.py", "improvement.py"), ("loop_stats.py", "status_data.py")
+# what a pass runs: a line of the plan changes a pass only if one of these reads it (a status page showing a line changes nothing)
+PASS_TOOLS = ("closed_loop.py", "cs_effect_check.py", "py_effect_check.py", "usecase_kg.py", "usecase_model.py", "buzzsaw.py")
 
 
 def improvement_registry(p=None):
@@ -154,9 +157,41 @@ def areas_and_kinds():
     return a, k
 
 
-def audit(root, say=print, registry=None):
+class PlanReaders(object):
+    """Which lines of run_plan's plan a pass acts on, found by reading the pass's tools, never from a list. MEASURED 10-30: all 17 stats of
+    gnn_tasks and survivor_rank read DECIDES because run_plan reads them, while no tool of a pass named the plan: 6 of its 7 lines were
+    written for a status page, and two of them flipped by seed alone with no effect on any pass. A reader names the plan AND quotes the
+    line, in its code proper (not a docstring, a selftest, or where it writes the name). Its breadcrumb: run_plan.PlanLine."""
+
+    def __init__(self, lines=None, tools=PASS_TOOLS):
+        if lines is None:
+            import run_plan
+            lines = run_plan.LINES
+        self.lines = lines
+        self.code = {t: reading(t) for t in tools}
+
+    def readers(self, name):
+        quoted = ('"%s"' % name, "'%s'" % name)
+        return sorted(os.path.basename(t) for t, c in self.code.items() if "run_plan" in c and any(q in c for q in quoted))
+
+    def reached(self):
+        return [l.name for l in self.lines if self.readers(l.name)]
+
+    def faults(self):
+        """a switch nobody reads (its on/off is a claim about a pass that no pass honours), or a line still marked as waiting that a pass
+        now reads (it would read None)"""
+        return ["%s: a switch no tool of a pass reads" % l.name for l in self.lines if not l.waits and not self.readers(l.name)] + \
+               ["%s: read by %s, yet still marked as waiting" % (l.name, ", ".join(self.readers(l.name))) for l in self.lines if l.waits and self.readers(l.name)]
+
+    def decides(self, record, field):
+        """True when the field feeds a line a pass acts on; False when it feeds only lines nobody acts on, or names no line"""
+        return any(l.rests_on(record, field) and self.readers(l.name) for l in self.lines)
+
+
+def audit(root, say=print, registry=None, plan=None):
     areas, kinds = areas_and_kinds()
     acting, showing = {t: reading(t) for t in ACTING}, [reading(t) for t in SHOWING]
+    plan = plan or PlanReaders()
     # covered by an IMPROVEMENT requirement (improvement/stat_requirements.yaml): a trigger improvement.py evaluates every tick
     covered, banked = improvement_registry(registry)
     out = collections.OrderedDict()
@@ -166,15 +201,16 @@ def audit(root, say=print, registry=None):
         quoted = ('"%s"' % leaf, "'%s'" % leaf)
         # a reader names the FILE and each field it uses; improvement.py reads the morph log only through its registry (`covered`
         # below): a word in its code is the registry's (10-30: its d.get("requirements") made the stat `requirements` DECIDES)
-        acts = "".join(c for t, c in acting.items() if names_file(c, base) and not (morph and t == "improvement.py"))
+        acts = "".join(c for t, c in acting.items() if t != "run_plan.py" and names_file(c, base) and not (morph and t == "improvement.py"))
         shows = "".join(c for c in showing if names_file(c, base))
+        in_plan = names_file(acting["run_plan.py"], base) and any(q in acting["run_plan.py"] for q in quoted)
         if field.split(".")[0] in IDENTITY:
             v = "IDENTITY"
-        elif (morph and field in areas) or any(q in acts for q in quoted):
+        elif (morph and field in areas) or any(q in acts for q in quoted) or (in_plan and plan.decides(base, field)):
             v = "DECIDES"
         elif leaf in covered:      # the morph log's stat, or the same stat described in an evidence row (a trend of it reads the log)
             v = "TRIGGERED"
-        elif (morph and field in kinds) or any(q in shows for q in quoted):
+        elif (morph and field in kinds) or in_plan or any(q in shows for q in quoted):
             v = "WATCHED"
         else:
             v = "UNREAD"
@@ -204,8 +240,68 @@ def audit(root, say=print, registry=None):
         for k in ("UNREAD", "WATCHED"):
             if by.get(k):
                 say("  %-8s %s" % (k, ", ".join(sorted(by[k]))))
+    reached = plan.reached()
+    say("the plan: %d of %d lines reach a pass%s; %d measured only%s" % (
+        len(reached), len(plan.lines), " (%s)" % ", ".join(reached) if reached else "",
+        sum(1 for l in plan.lines if l.waits), " (%s)" % ", ".join(l.name for l in plan.lines if l.waits) if any(l.waits for l in plan.lines) else ""))
+    faults = plan.faults()
+    for f in faults:
+        say("  UNREAD   the plan's line %s" % f)
+    unread += len(faults)
     say("telemetry_audit: %d stat(s) UNREAD%s" % (unread, " - each needs a reader that acts on it, or the loop stops recording it" if unread else ""))
     return out, unread
+
+
+def plan_lines_checked(t):
+    """a plan's line is reached only by a tool of the pass that names the plan and quotes the line in its code; a switch nobody reads fails
+    the audit, a stat that only feeds a line nobody reads is WATCHED, and one that feeds a line a pass reads DECIDES"""
+    import run_plan
+    d = os.path.join(t, "plan_probe")
+    os.makedirs(d)
+    line = run_plan.PlanLine("plant switch", {"gnn_tasks": ("jobs.planted",)})
+    wait = run_plan.PlanLine("plant waits", {"gnn_tasks": ("jobs.waited",)}, waits="a reader")
+
+    def tool(name, code):
+        p = os.path.join(d, name)
+        io.open(p, "w", encoding="utf-8").write(code)
+        return p
+    no_plan = tool("a.py", "def f(r):\n    return r['plant switch']\n")                                   # quotes the line, never names the plan
+    fixture = tool("b.py", "import run_plan\ndef selftest():\n    return {}['plant switch']\n")             # only in a selftest
+    written = tool("c.py", "import run_plan\ndef f(p):\n    p['plant switch'] = 1\n")                      # only writes it
+    doc = tool("d.py", "import run_plan\ndef f():\n    \"\"\"reads 'plant switch'\"\"\"\n    return 1\n")    # only says so
+    real = tool("e.py", "import run_plan\ndef f(k):\n    return run_plan.decide(k)['plant switch']['on']\n")
+
+    def audited(tools, lines):
+        plan = PlanReaders(lines, tools)
+        rows = os.path.join(t, "plan_root")
+        os.makedirs(rows, exist_ok=True)
+        io.open(os.path.join(rows, "gnn_tasks.jsonl"), "w", encoding="utf-8").write(json.dumps({"jobs": {"planted": {}, "waited": {}}}) + "\n")
+        return plan, audit(rows, say=lambda s: None, registry=os.path.join(t, "reg.yaml"), plan=plan)[1]
+    nobody, unread_nobody = audited((no_plan, fixture, written, doc), (line,))
+    reader, unread_real = audited((real,), (line,))
+    stale_wait = PlanReaders((run_plan.PlanLine("plant switch", {}, waits="a reader"),), (real,)).faults()
+    good = nobody.reached() == [] and len(nobody.faults()) == 1 and "no tool of a pass reads" in nobody.faults()[0] and unread_nobody == unread_real + 1
+    good = good and reader.reached() == ["plant switch"] and not reader.faults() and reader.decides("gnn_tasks", "jobs.planted") \
+        and not reader.decides("gnn_tasks", "jobs.waited") and not nobody.decides("gnn_tasks", "jobs.planted")
+    good = good and len(stale_wait) == 1 and "still marked as waiting" in stale_wait[0]
+    waiting = PlanReaders((wait,), (real,))
+    good = good and not waiting.faults() and waiting.reached() == [] and not waiting.decides("gnn_tasks", "jobs.waited")
+    # the verdict itself: the same real job, read by run_plan either way, DECIDES only when a tool of the pass reads the line it feeds
+    owner = [l for l in run_plan.LINES if l.name == "gnn owner"][0]
+    reads_owner = tool("f.py", "import run_plan\ndef f(k):\n    return run_plan.decide(k)['gnn owner']['on']\n")
+    rows = os.path.join(t, "plan_root")
+    io.open(os.path.join(rows, "gnn_tasks.jsonl"), "w", encoding="utf-8").write(json.dumps({"jobs": {"owner as today": {}}}) + "\n")
+
+    def verdict(tools):
+        return audit(rows, say=lambda s: None, registry=os.path.join(t, "reg.yaml"), plan=PlanReaders((owner,), tools))[0]["gnn_tasks.jsonl"]["jobs.owner as today"]
+    good = good and verdict((reads_owner,)) == "DECIDES" and verdict((no_plan,)) == "WATCHED"
+    # on the real tools: a pass reads every switch, and no line still marked as waiting
+    actual = PlanReaders()
+    lines = {l.name: l for l in run_plan.LINES}
+    good = good and all((actual.readers(n) != []) == (not l.waits) for n, l in lines.items())
+    print("selftest: PLAN a line is reached only by a tool of the pass naming the plan and quoting the line in its code; a switch nobody reads fails the "
+          "audit, a line still waiting once read fails it too, and a stat counts as deciding only through a line a pass reads %s" % ("PASS" if good else "FAIL"))
+    return good
 
 
 def selftest():
@@ -252,6 +348,8 @@ def selftest():
     good2 = not false_readers and names_only and areas_right and m.get("requirements") == "WATCHED" and ev.get("shape.requirements") == "DECIDES" \
         and ev.get("shape.covered_by_a_trigger") == "TRIGGERED" and ev.get("shape.never_in_a_reader") == "UNREAD" \
         and ev.get("jobs.owner as today") == "DECIDES" and ev.get("jobs.only_a_plant_job") == "UNREAD"
+    good3 = plan_lines_checked(t)
+    good = good and good3
     print("selftest: READER a name in a selftest, a name where the code writes it, a name another record's reader reads and an area's name are "
           "no readers; a stat trended under its own name is covered in an evidence file too %s%s" % (
               "PASS" if good2 else "FAIL", "" if good2 else " %s" % ([false_readers, names_only, areas_right, ev],)))

@@ -633,7 +633,7 @@ def behaviour_mutants(st, a=None):
             uniq.append((what, new))
     # one of each operator KIND before a second of any (REVIEW_2 #4: a cap of 12 in source order cut the newest operators off the
     # richest statements - LinesOnSale got no body-removed mutant), then the rest, up to the cap
-    kind = lambda w: re.sub(r"\s*\(\d+\)$", "", re.sub(r"^(boundary|equality|logic|arithmetic) .*", r"", re.sub(r"'s argument \d+", "'s argument", w)))
+    kind = lambda w: re.sub(r"\s*\(\d+\)$", "", re.sub(r"^(boundary|equality|logic|arithmetic) .*", r"\1", re.sub(r"'s argument \d+", "'s argument", w)))
     first, rest, seen = [], [], set()
     for what, new in uniq:
         (rest if kind(what) in seen else first).append((what, new))
@@ -1347,6 +1347,13 @@ def selftest():
     good = not any(w.startswith("arithmetic") for w, _ in behaviour_mutants(st))
     ok &= good
     print("selftest: ALL   a string's + is never made a - (it would not compile) %s" % ("PASS" if good else "FAIL"))
+    # the cap of PER_STATEMENT never cuts a whole family off a rich statement: a dozen `<` and `&&` come first in source order here, so while the
+    # four families were one kind the cap fell before the `==` and the `+` (10-30: a control character stood where \1 was meant, since 10-29)
+    st = Statement(p, 0, 0, "if (a < b && c < d && e < f && g < h && i < j && k < l && m < n && o < p && q < r && s < t && u < v && w < x && y == z) return n + 1;", "branch")
+    fam = sorted({w.split(" ")[0] for w, _ in behaviour_mutants(st)} & {"boundary", "equality", "logic", "arithmetic"})
+    good = fam == ["arithmetic", "boundary", "equality", "logic"]
+    ok &= good
+    print("selftest: ALL   the cap leaves every family of operator on a rich statement: %s %s" % (fam, "PASS" if good else "FAIL"))
     # the schema: the method copied with one change, the original dispatching to it, the switch written once
     d = C.decl("Wallet.Pay")
     pay = [s for s in C.method("Wallet.Pay") if "Money" in s.text][0]

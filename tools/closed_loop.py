@@ -277,6 +277,48 @@ def self_improve_on(model_dir, flag=True):
     return ((meta.get("meta") or {}).get("loop") or {}).get("self_improve", True) is not False
 
 
+def plan_for_pass(kgdir):
+    """The plan as it stands BEFORE this pass rebuilds the graph: the evidence is about the graph it measured, and new code is exactly what
+    the proposer is for, so a check after the rebuild would turn it off on every pass that changed anything. A plan that has the GNN on
+    needs torch: said now, in seconds, rather than after the breaks have run."""
+    import run_plan
+    plan = run_plan.decide(os.path.normpath(kgdir), roots=(os.path.join(HERE, ".."),))
+    if plan["gnn owner"]["on"]:
+        import graph_gnn  # noqa: F401
+    return plan
+
+
+def owner_section(dbp, plan, gg=None, gm=None):
+    """Report section 6, as the project's own plan says (run_plan.PlanLine). Measured 10-30: `--gnn` measured and proposed whatever the plan
+    said, and only a sentence in a runbook told anyone to look. On the shops the plan said off (the kill vote 0.84, the GNN 0.78) while the
+    GNN cleared the door's five plain rules (best 0.67), because this door never asked the sixth. Off: nothing is trained, and the line's
+    reason is the report. On: it hears the relations the plan's lines switch on, and the kill vote sits among the rules it must beat."""
+    owner = plan["gnn owner"]
+    if not owner["on"]:
+        return ["## 6. Who owns each branch: the GNN proposer stays off\nThis project's plan (run_plan.py) says: %s. Nothing was trained in "
+                "this pass. To measure it: gnn_tasks.py eval on this graph, and a win turns it on." % owner["why"]]
+    if gg is None:
+        import gnn_more as gm
+        import graph_gnn as gg
+    hearing = {"kills": bool(plan["relation caught by"]["on"]), "calls": bool(plan["relation calls"]["on"])}
+    v = gm.pass_view(dbp, **hearing)
+    res = gg.evaluate(v, 5, 0, 300, "method")
+    text, beats = gg.report(res, "method")
+    out = ["## 6. Who owns each branch: the GNN proposer, measured first\nThe plan has it on: %s. It hears: %s.\n```\n%s\n```" % (
+        owner["why"], ", ".join(n for n, k in (("caught by", "kills"), ("calls", "calls")) if hearing[k]) or "the graph as it stands", text)]
+    unowned = [c for c in v.cells if not any(cc == c for cc, _ in v.links)]
+    if beats and unowned:
+        proposer = gg.LinkProposer(v, 0, 300).fit(v.links, [])
+        out.append("Proposals (questions, never claims - a person or an exact check accepts one):")
+        for c in unowned:
+            conf = proposer.confidence(c)
+            out.append("- %s: %s" % (c[14:], ("%s (%.0f%% sure)" % (", ".join(r[4:] for r in proposer.rank(c)[:3]), 100 * conf)) if conf >= gg.SURE
+                                     else "no proposal: the GNN is %.0f%% sure, below its %.0f%% bar (it abstains)" % (100 * conf, 100 * gg.SURE)))
+    elif beats:
+        out.append("Every branch is claimed: nothing to propose.")
+    return out
+
+
 def run(model_dir, chains, kill, out, reuse=True, workers=2, pin=None, gnn=False, note=None, accept=None, since=None, self_improve=True):
     lines, worst = [], 0
     started = time.time()
@@ -298,6 +340,9 @@ def run(model_dir, chains, kill, out, reuse=True, workers=2, pin=None, gnn=False
     # the verdicts live beside the model from its FIRST run (MEASURED 10-29 on the kit's example: with no kg/ yet they went to a temp
     # folder, so the morph log had nothing to read and the next run could not reuse them)
     os.makedirs(kgdir, exist_ok=True)
+    plan = plan_for_pass(kgdir) if gnn else None
+    if plan:
+        print("closed_loop: the plan has the owner GNN %s: %s" % ("on" if plan["gnn owner"]["on"] else "off", plan["gnn owner"]["why"]))
     vpath = os.path.join(kgdir, "verdicts.json")
     code_sha = cs.sha("".join(sorted(code.files.values())))
     effects = cs.sha(json.dumps(sorted(a.text() for r in model.requirements.values() for a in r.effect)))
@@ -451,23 +496,8 @@ def run(model_dir, chains, kill, out, reuse=True, workers=2, pin=None, gnn=False
             lines.append("- BLIND SPOTS (the model holds them, the chain never looked): " + ", ".join(blind))
     kg.db.close()
     if gnn:
-        # THE PROPOSER (graph_gnn.py), measured before it speaks: whole methods hidden, against random / words / same-method
-        import graph_gnn as gg
-        v = gg.GraphView(dbp)
-        res = gg.evaluate(v, 5, 0, 300, "method")
-        text, beats = gg.report(res, "method")
-        lines.append("## 6. Who owns each branch: the GNN proposer, measured first\n```\n" + text + "\n```")
-        unowned = [c for c in v.cells if not any(cc == c for cc, _ in v.links)]
-        if beats and unowned:
-            p = gg.LinkProposer(v, 0, 300).fit(v.links, [])
-            lines.append("Proposals (questions, never claims - a person or an exact check accepts one):")
-            sure = gg.SURE
-            for c in unowned:
-                conf = p.confidence(c)
-                lines.append("- %s: %s" % (c[14:], ("%s (%.0f%% sure)" % (", ".join(r[4:] for r in p.rank(c)[:3]), 100 * conf)) if conf >= sure
-                                           else "no proposal: the GNN is %.0f%% sure, below its %.0f%% bar (it abstains)" % (100 * conf, 100 * sure)))
-        elif beats:
-            lines.append("Every branch is claimed: nothing to propose.")
+        # THE PROPOSER (graph_gnn.py), where the plan has it on, measured before it speaks: whole methods hidden, against the plain rules
+        lines += owner_section(dbp, plan)
     # THE HOLES, kept beside the report so a later run can say what IT changed (--since)
     keys = hole_keys(gate)
     hpath = (out or os.path.join(kgdir, "CLOSED_LOOP.md")) + ".holes.json"
@@ -507,6 +537,62 @@ def run(model_dir, chains, kill, out, reuse=True, workers=2, pin=None, gnn=False
         for line in loop_stats.summary(model_dir):     # the stats choose what to improve next, and every 20 passes a report
             print("closed_loop: " + line)
     return worst
+
+
+def plan_obeyed():
+    """owner_section with stand-ins for the GNN's two modules: this is about what the pass DOES with each line, and the GNN's own scores are
+    graph_gnn's selftest. A stand-in that is touched when the plan says off fails the check."""
+    calls = {}
+
+    class Touched(Exception):
+        pass
+
+    class Off(object):
+        def __getattr__(self, name):
+            raise Touched(name)
+
+    class View(object):
+        cells, links = ["cell:S-BRANCH:T.M#b0", "cell:S-BRANCH:T.M#b1"], [("cell:S-BRANCH:T.M#b1", "req:R-1")]
+
+    class Proposer(object):
+        def __init__(self, v, seed, epochs):
+            pass
+
+        def fit(self, links, hidden):
+            calls["fit"] = True
+            return self
+
+        def confidence(self, c):
+            return 0.9
+
+        def rank(self, c):
+            return ["req:R-1", "req:R-2"]
+
+    def gg(beats):
+        return type("GG", (), {"SURE": 0.7, "LinkProposer": Proposer, "evaluate": staticmethod(lambda v, *a: {"r": 1}), "report": staticmethod(lambda r, g: ("the table", beats))})
+
+    def gm():
+        return type("GM", (), {"pass_view": staticmethod(lambda db, kills, calls: calls_of(kills, calls))})
+
+    def calls_of(kills, called):
+        calls["heard"] = (kills, called)
+        return View()
+
+    def plan(owner, caught, called):
+        return {"gnn owner": {"on": owner, "why": "the line's reason"}, "relation caught by": {"on": caught}, "relation calls": {"on": called}}
+    try:
+        off = "\n".join(owner_section("g", plan(False, True, True), gg=Off(), gm=Off()))
+    except Touched:
+        return False
+    good = "stays off" in off and "the line's reason" in off
+    on = "\n".join(owner_section("g", plan(True, True, False), gg=gg(True), gm=gm()))
+    good = good and calls.get("heard") == (True, False) and "the table" in on and "R-1, R-2 (90% sure)" in on and "It hears: caught by." in on
+    calls.clear()
+    other = "\n".join(owner_section("g", plan(True, False, True), gg=gg(True), gm=gm()))
+    good = good and calls.get("heard") == (False, True) and "It hears: calls." in other
+    calls.clear()
+    lost = "\n".join(owner_section("g", plan(True, False, False), gg=gg(False), gm=gm()))
+    return good and calls.get("heard") == (False, False) and "fit" not in calls and "Proposals" not in lost and "the graph as it stands" in lost
 
 
 def selftest():
@@ -606,6 +692,10 @@ public class Mixed {
     good = good and not self_improve_on(sw)
     ok &= good
     print("selftest: SWITCH self-improvement is on by default, and off by the flag or by the model's loop block %s" % ("PASS" if good else "FAIL"))
+    good = plan_obeyed()
+    ok &= good
+    print("selftest: PLAN off, the GNN is never trained and the report gives the line's reason; on, it hears exactly the relations the plan's lines "
+          "switch on, is measured, and proposes only when it wins %s" % ("PASS" if good else "FAIL"))
     print("selftest: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 
@@ -621,7 +711,8 @@ def main(argv):
     ap.add_argument("--no-self-improve", action="store_true", help="this pass records no row in the morph log and prints no picks (self-improvement is on by default)")
     ap.add_argument("--since", help="an earlier report (or its .holes.json): list the holes of ours this change ADDED and CLOSED, "
                                     "apart from those already there")
-    ap.add_argument("--gnn", action="store_true", help="measure the GNN proposer on the graph and show its proposals when it wins")
+    ap.add_argument("--gnn", action="store_true", help="the owner GNN, as this project's plan says (run_plan.py): off, the report says why and nothing "
+                                                       "is trained; on, it is measured and proposes when it wins")
     ap.add_argument("--out")
     ap.add_argument("--fresh", action="store_true", help="re-run every mutant even when the code and the effects are unchanged")
     ap.add_argument("--workers", type=int, default=2, help="mutants run at once")

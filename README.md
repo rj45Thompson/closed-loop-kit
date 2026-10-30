@@ -129,9 +129,11 @@ where no test looks.
 - Over five passes, breaks made went 340 -> 806, breaks no test caught 89 -> 29 (most of the rest proven or explained equivalent), and
   statements held by a test 31 -> 169 of 173.
 - Walking the use cases found 10 requirements nobody had written, beside the 17 already written.
-- The graph neural network, on whole methods it never saw, scored MRR 0.76 against 0.67 for the best plain ranker. It beat the plain rule
-  only on the largest model tried (27 requirements over 41 methods) and only once about half of its code was claimed. On the 4-requirement
-  examples the plain rule won at every fullness. Until your model is that full, read the plain rule's suggestions.
+- The graph neural network, on whole methods it never saw, scored MRR 0.76 against 0.67 for the best plain ranker that reads no test results.
+  Once test results exist a plain count beats it, 0.84 against 0.77, so owners on that feature come from the count. When at least 70% sure it was
+  right 92% of the time, on about 40% of new code, over four seeds; below that it abstains.
+  It only beat the no-test-results rule on the largest model tried (27 requirements over 41 methods), and only once about half of its code was claimed.
+  On the 4-requirement examples the plain rule won at every fullness. Until your model is that full, read the plain rule's suggestions.
 
 ## Honest limits
 

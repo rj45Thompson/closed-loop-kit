@@ -114,11 +114,22 @@ def kills(self, cell, visible):
     return sorted(self.v.reqs, key=lambda r: (-v.get(r, 0), -at.get(r, 0), -self.cos(cell, r), r))
 
 
-def evaluate(db, seeds=(0, 1), folds=5, epochs=300, say=print):
+def with_kill_vote():
+    """graph_gnn's rankers and its bar with the added relations understood and the KILLS rule among the plain rules"""
     gg.group_of = group_of
     gg.Baselines.kills = kills
     if "kills" not in gg.BASELINES:
         gg.BASELINES = gg.BASELINES + ("kills",)
+
+
+def pass_view(db, kills=False, calls=False):
+    """the graph as a pass's owner GNN reads it: the relations the plan switched on, measured against the same six rules the plan compares"""
+    with_kill_vote()
+    return RichView(db, kills=kills, calls=calls)
+
+
+def evaluate(db, seeds=(0, 1), folds=5, epochs=300, say=print):
+    with_kill_vote()
     rows = {}
     for name, kw in (("as today", {}), ("+ caught by", {"kills": True}), ("+ calls", {"calls": True}), ("+ both", {"kills": True, "calls": True})):
         v = RichView(db, **kw)
