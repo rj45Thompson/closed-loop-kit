@@ -1,0 +1,49 @@
+# The closed loop kit as a pip package, so that `uvx` and `pipx run` run it with no clone. The kit's folders keep their names; setuptools maps them onto one
+# importable package, closed_loop_kit, laid out the way an installed kit is (the tools flat, the examples, the skill and the agent layouts beside them),
+# because the tools find each other and their examples by their own location. Built from the output of build_kit.py, which has already run the privacy gate.
+# Nothing here publishes anything: a package index needs the owner's account.
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "closed-loop-kit"
+version = "0.1.3.dev0"
+description = "Test the requirements an AI acts on, then hold them to the code, the tests and the written argument for each change."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = ["PyYAML>=5.4"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.urls]
+Repository = "https://github.com/rj45Thompson/closed-loop-kit"
+
+[project.scripts]
+closed-loop-kit = "closed_loop_kit.cli:main"
+closed-loop = "closed_loop_kit.cli:main"
+
+[tool.setuptools]
+include-package-data = false
+packages = ["closed_loop_kit", "closed_loop_kit.skill", "closed_loop_kit.agents", "closed_loop_kit.example", "closed_loop_kit.example_py", "closed_loop_kit.example_grow"]
+
+[tool.setuptools.package-dir]
+closed_loop_kit = "tools"
+"closed_loop_kit.skill" = "skill"
+"closed_loop_kit.agents" = "agents"
+"closed_loop_kit.example" = "example"
+"closed_loop_kit.example_py" = "example_py"
+"closed_loop_kit.example_grow" = "example_grow"
+
+[tool.setuptools.package-data]
+closed_loop_kit = ["*.md", "*.yaml", "LICENSE", "improvement/*", "il_bodies/*"]
+"closed_loop_kit.skill" = ["*"]
+"closed_loop_kit.agents" = ["*"]
+"closed_loop_kit.example" = ["**/*"]
+"closed_loop_kit.example_py" = ["**/*"]
+"closed_loop_kit.example_grow" = ["**/*"]

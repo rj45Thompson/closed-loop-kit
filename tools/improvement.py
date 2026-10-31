@@ -209,8 +209,9 @@ def _epoch(s):
         return 0.0
 
 
-def graph(models=MODELS, reg=REG, ledger_path=LEDGER, audit=None, say=print):
-    """level 2: nodes and edges, its closure, and its own stats (level 3, the same graph)"""
+def level2(models=MODELS, reg=REG, ledger_path=LEDGER):
+    """the improvement graph as data and nothing else: (nodes, edges, fired triggers, measured outcomes, requirements, banked records, ledger). It writes no log, so a page can read
+    the same graph `graph` closes without adding a reading to graph_stats.jsonl (that file is a series of passes, and a page build is not one)"""
     reqs, banked = load(reg)
     ledger = read_ledger(ledger_path)
     nodes, edges = set(), []
@@ -229,6 +230,12 @@ def graph(models=MODELS, reg=REG, ledger_path=LEDGER, audit=None, say=print):
         edges.append(("tick:" + str(o["item"]), "targets", "stat:" + o["stat"]))
         if o["moved"] is not None:
             edges.append(("tick:" + str(o["item"]), "moved %+g" % o["moved"], "stat:" + o["stat"]))
+    return nodes, edges, fired, outs, reqs, banked, ledger
+
+
+def graph(models=MODELS, reg=REG, ledger_path=LEDGER, audit=None, say=print):
+    """level 2: nodes and edges, its closure, and its own stats (level 3, the same graph)"""
+    nodes, edges, fired, outs, reqs, banked, ledger = level2(models, reg, ledger_path)
     # CLOSURE, level 1's rules one level up
     acted = [t for t in ledger if "item" in t]
     unended = [f for f in fired if not f["answered_by"]]

@@ -7,7 +7,37 @@ description: "Hold an AI's work to its owner's requirements: the requirements ke
 
 Tools: `{TOOLS}` (installed by the kit's install.py). Read `{TOOLS}/README.md` once; it says WHEN this pays and when it does not.
 
-## Start here: you have text and no model (an epic, a PRD, a ticket export, a transcript)
+## Start here: someone can be asked (a producer, a designer, an owner)
+
+If the rules live in a person's head, get them out before anything else. `elicit.py` is the record of that. No key, no model, no .NET.
+
+```
+python -X utf8 {TOOLS}/elicit.py start <folder> --interface INTERFACE.md --things "<what the text names>" --phases "<the stages of play or use>" --producer "<command with {q}>"
+python -X utf8 {TOOLS}/elicit.py grid <folder>                     # the squares nobody has asked about, each with its question
+python -X utf8 {TOOLS}/elicit.py ask <folder> --file batch.txt     # lines of `<square>: <question>`. All asked together, each reply printed with its number
+python -X utf8 {TOOLS}/elicit.py rules <folder> --file rules.txt   # `R1 | for 12 40 | The sentence.` Add `| against 77 |` for an answer that disagrees. `R3 | silent 14 52 | MY READING: ...`
+python -X utf8 {TOOLS}/elicit.py check <folder> [--tests code_test.py]   # what is open, most important first. Exit 1 while anything is
+python -X utf8 {TOOLS}/elicit.py export <folder> --rules RULES.md
+python -X utf8 {TOOLS}/elicit.py breaks --code code.py --test code_test.py --out breaks.txt   # the one pass at the end
+```
+
+With no command for the person, leave out `--producer`: `ask` prints each question to put, and `answer <folder> <n> "their words"` records the reply.
+
+Work in this order. The order is the point: a closed loop holds a wrong requirement as tightly as a right one, so nothing after this step can catch what this step gets wrong.
+
+1. **Ask widely before you write anything.** Go through the grid in batches of about ten, phases first. A batch costs far less than the same questions one at a time. Ask one thing per question, in the person's words: a name only your interface uses comes back as silence, and a question with two parts may come back with one. Skip a square only with a reason (`skip <folder> <square> "<why>"`). New rules open new squares of thought: when an answer names a state or an exception you had not heard of, ask about it the same way, and ask what it does to each act.
+2. **Write each rule down as one sentence the moment you have it,** in `rules.txt`, with the numbers of the answers it stands on.
+3. **Every rule needs two hearings, in different forms, and they must agree.** An answer is a witness, not the truth: people misspeak and contradict themselves. Ask open first: what, when, who, how. Then the second hearing, as a choice between two readings: "Which of these is the rule: (a) ... or (b) ...", the one you hold and the likeliest other, in about sixty words. A situation that leaves the outcome to fill in is the other way, and it goes wrong far more often, on arithmetic above all. Do not read your own sentence back: on a trial a false sentence was confirmed as readily as a true one. A bare No is weak too. Rules of arithmetic and thresholds go wrong most, so hear those more than twice. Questions in the same words teach nothing and the tool will not ask them twice.
+4. **When two answers disagree, record it and ask again:** put the two readings as a choice, then ask open in new words. Do not pick the one you like. The rule stays open until the answers for it outnumber the answers against by two. If the person keeps disagreeing with themselves, write that in your report as an open question: that is a true finding.
+5. **"Not specified" is not the end.** Ask once more in other words, as a situation, before you call the rules silent. A refused or unusable reply is no answer at all: narrow the question and ask again. Only after that write `MY READING:` and decide.
+6. **Tests come from the rules, not from the code.** One short test for each rule's situation, its expected value taken from the answer, with `# CHECKS: R12` above it. Hold the rules; do not try to reach every statement. Then write the code.
+7. **The loop comes last and once.** One `breaks` pass over the finished code. A break the tests miss is a question: does it name a rule nobody asked about? If so, ask. If not, leave it and say so. A clean pass says the tests hold the code to the rules as you read them; it says nothing about whether you read them right.
+8. Stop asking with time left to build: at most about half your time goes to asking, and working code that holds the rules you have beats a perfect record with no code.
+
+The whole loop below (the model, the graph, every criterion) is for after this, when requirements must stay true across many changes. Do not start there.
+
+<!-- agent-layouts:begin: the next two sections are what agent_layouts.py writes into the other agents' files -->
+## Start here: you have text and no model, and nobody to ask (an epic, a PRD, a ticket export, a transcript)
 
 Two commands take it to the first question for the person who owns the text. No key, no .NET, five minutes.
 
@@ -41,6 +71,8 @@ python -X utf8 {TOOLS}/ab_loop.py harvest|sandbox|brief|outcome|grade|record|boa
 python -X utf8 {TOOLS}/doc_nodes.py what-to-update <node id> --db <model>/../kg/<name>.sqlite     # which documents describe this node
 ```
 Set `CLOSED_LOOP_ROOT` to the project the model's paths are relative to. Exit 1 = a hole of ours; the owner's questions never fail it.
+
+<!-- agent-layouts:end -->
 
 ## The model
 

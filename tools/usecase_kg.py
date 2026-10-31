@@ -117,6 +117,14 @@ class Gap(object):
         return "[%s] %s: %s" % (self.rule, self.entity, self.message)
 
 
+def test_node(name):
+    """the node a test is known by. A C# or class-qualified name (`Fixture.Test`) is known by its method alone; a check LABEL (a
+    selftest line such as "CLAIMS an intruder branch stales Wallet.Pay's claim") is known whole, because cutting it at its last dot
+    made a different test of it and the requirement's check never met the break it caught (found naming the kit's own checks)"""
+    n = str(name)
+    return n.rsplit(".", 1)[-1] if re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+", n) else n
+
+
 class KnowledgeGraph(object):
     """The store: entities with stable ids, typed edges carrying their evidence family, literals, and the declared schema."""
 
@@ -222,8 +230,8 @@ class KnowledgeGraph(object):
             for n in (V.get("says") or {}).get(r.id, []):
                 edge(rid, 139, name(n))
             for t in r.checks:
-                ent("test:%s" % t.rsplit(".", 1)[-1], "test", t)
-                edge(rid, 149, "test:%s" % t.rsplit(".", 1)[-1])
+                ent("test:%s" % test_node(t), "test", t)
+                edge(rid, 149, "test:%s" % test_node(t))
         # every mutant of the code as a node: what it broke (an assertion, a branch cell), where, its verdict, the tests that caught
         # it. A verdict is a measurement (MEASURED), so a mutant never moves a requirement's fingerprint.
         for t in V.get("tests") or []:
@@ -738,7 +746,9 @@ class LoopGate(object):
         ms = self.V.get("mutants")
         if ms is None:
             return [Gap("", "the checks", "not measured: no mutants were run (cs_effect_check does, for C#)", failing=False)]
-        ran = set(self.V.get("tests") or [])
+        # a test that caught a break has run: the base run lists only the checks that PASSED by name, so a check that reports
+        # CAUGHT or MISSED (a plant) would otherwise read as one that never ran
+        ran = set(self.V.get("tests") or []) | {t for m in ms.values() for t in m.get("by") or [] if not t.startswith("(")}
         # the branches a requirement CLAIMS are its code as much as its effects' statements (REVIEW_1 #7, 10-29): its check must
         # notice them break too, or a claim is a word with no test behind it
         claimed = collections.defaultdict(set)
@@ -754,7 +764,7 @@ class LoopGate(object):
                 by = sorted({t for _, m in mine_ms for t in m.get("by") or []})
                 out.append(Gap("", "req:%s" % r.id, "names no test as its check (checks:); its code is caught by %s" % ", ".join(by[:3]), failing=False))
                 continue
-            mine = {c.rsplit(".", 1)[-1] for c in r.checks}
+            mine = {test_node(c) for c in r.checks}
             gone = sorted(mine - ran) if ran else []
             if gone:
                 out.append(Gap("", "req:%s" % r.id, "its check names a test that never ran: %s" % ", ".join(gone)))
@@ -1179,6 +1189,18 @@ def loop_selftest(tmp, prose):
     good = "req:R-2" in named and "req:R-2" not in clean_named
     ok &= good
     print("selftest: LOOP L20  a requirement no document describes is listed by name, and only then -> %s" % ("PASS" if good else "FAIL"))
+    # a check named by its printed label, with a dot in it, is one test: not cut at the dot, caught-by and checked-by meet on one node,
+    # and a test that caught a break counts as having run (the base run lists only the checks that passed by name)
+    label = "CLAIMS an intruder stales Wallet.Pay (3 -> 4)"
+    m, d, vv = copy.deepcopy(meta), copy.deepcopy(data), copy.deepcopy(v)
+    d["requirements"][0]["checks"] = ["T.One", label]
+    vv["mutants"]["G#s1: the condition negated"]["by"] = ["One", label]
+    g2 = gate(m, d, vv, "plant_label")
+    l16 = [h for h in g2.own_check() if h.entity == "req:R-1"]
+    joined = {r[0] for r in g2.kg.db.execute("SELECT o FROM edge WHERE p = 149 AND s = 'req:R-1'")} &         {r[0] for r in g2.kg.db.execute("SELECT o FROM edge WHERE p = 148")}
+    good = not l16 and ("test:" + label) in joined and test_node("T.One") == "One" and test_node(label) == label
+    ok &= good
+    print("selftest: LOOP L16  a check named by a label with a dot in it is one test, met by the break it caught -> %s" % ("PASS" if good else "FAIL %s %s" % (l16, sorted(joined))))
     return ok
 
 

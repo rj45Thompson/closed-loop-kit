@@ -1,0 +1,53 @@
+---
+description: "Hold an AI's work to its owner's requirements, with the closed loop: grow a requirements model from an epic, a PRD, a ticket export or a transcript, put its questions to the producer one at a time, run the loop on code, and prove the install. Use when asked to grow, check or close requirements."
+alwaysApply: false
+---
+<!-- closed-loop:begin source=skill/SKILL.md sha256=87142ff46f9c21162d5c021cf75d36336cb64d6849ce7ff75cdc87fd1cea2728 -->
+# Closed loop
+
+Hold an AI's work to its owner's requirements. For building larger systems where requirements must stay true across many changes - not for one-off prompts.
+
+The front door is two commands, `grow` and then `ask`; after code exists, `run` holds it to the requirements and `prove` checks the install.
+
+## Getting the command
+
+Every command below is `closed-loop-kit`. Needs Python 3.10 or newer; PyYAML is installed with it. If it is not on the PATH, run it from the public repository with no clone:
+
+```
+uvx --from git+https://github.com/rj45Thompson/closed-loop-kit closed-loop-kit <command>
+pipx run --spec git+https://github.com/rj45Thompson/closed-loop-kit closed-loop-kit <command>
+```
+
+or install it once with `uv tool install git+https://github.com/rj45Thompson/closed-loop-kit` or `pipx install git+https://github.com/rj45Thompson/closed-loop-kit`. `closed-loop-kit try` runs the shipped example and must print HOLDS.
+
+## Start here: you have text and no model, and nobody to ask (an epic, a PRD, a ticket export, a transcript)
+
+Two commands take it to the first question for the person who owns the text. No key, no .NET, five minutes.
+
+```
+closed-loop-kit grow <the text> --out <model folder>      # 1st run: numbers every sentence, writes BRIEF.md and a skeleton draft.yml, exits 3
+# YOU are the reader. Edit <model folder>/draft.yml from the numbered sentences (BRIEF.md says how), then run the SAME command again:
+closed-loop-kit grow <the text> --out <model folder>      # refuses a draft it cannot ground, or writes the model and prints the first question
+closed-loop-kit ask <model folder>                        # the next question (exit 1), or "nothing is open" (exit 0)
+closed-loop-kit ask <model folder> --confirm | --answer "<their words>" --check "<how it would be seen to hold>" | --absent "<reason>" | --later "<reason>"
+```
+
+- **Do not invent.** Every requirement in the draft quotes at least two words of a numbered sentence and cites its key, or is INFERRED with the reason a step of the chain needs it.
+  A requirement that cites nothing, cites a sentence that is not there, quotes words the sentence lacks, or is inferred with a one-line reason, is REFUSED and nothing is written.
+  A field the text does not state (a goal's trigger, pre, minimal, success, why) is left out of the draft; it becomes a question.
+- **Ask the producer the sentence the tool prints, in those words.** It is plain words with no id in it. Then give the tool the reply exactly as the producer gave it. Never answer a question yourself.
+  ABSENT needs a reason ("nothing there, because ..."). "Probably fine" records nothing.
+- **Keep asking until it says nothing is open.** Each answer changes the model, and the next question comes from the new state; it never repeats one that has an answer on record,
+  and a session that stops resumes where it was (all state is in `<model folder>/answers.yaml`). If you must stop early, `ask <model folder> --status` says how many are open: say so.
+- The questions are ranked: two statements that disagree, then a need nobody authored, then a sentence of the text nothing captures, then a goal with no alternate path, then the fields of a goal.
+- Then `run` (below) holds code to the requirements this grew. A grown model has no code yet; it is the requirements an agent will write to.
+
+## Run it
+
+```
+closed-loop-kit run <model folder> [--chain C.yaml ...] [--out REPORT.md] [--gnn]
+       [--pin-claims "<why>"] [--accept "<why>"] [--since EARLIER.md] [--overlay SANDBOX] [--note "<what this pass changed>"]
+closed-loop-kit prove [--quick]             # every selftest and example of this install, together; one result: passed, failed, unknown, not run and why
+```
+Set `CLOSED_LOOP_ROOT` to the project the model's paths are relative to. Exit 1 = a hole of ours; the owner's questions never fail it.
+<!-- closed-loop:end -->

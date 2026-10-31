@@ -1,0 +1,55 @@
+{
+  "command": "closed-loop-kit",
+  "docs_read_on": "2026-10-31",
+  "layouts": {
+    "agents-md": {
+      "agents": [
+        "codex",
+        "opencode",
+        "agents"
+      ],
+      "dest": "AGENTS.md",
+      "docs": "https://developers.openai.com/codex/guides/agents-md and https://opencode.ai/docs/rules/",
+      "kind": "block",
+      "src": "AGENTS.md"
+    },
+    "copilot": {
+      "agents": [
+        "copilot"
+      ],
+      "dest": ".github/copilot-instructions.md",
+      "docs": "https://docs.github.com/en/copilot/how-tos/configure-custom-instructions/add-repository-instructions",
+      "kind": "block",
+      "src": "copilot-instructions.md"
+    },
+    "cursor": {
+      "agents": [
+        "cursor"
+      ],
+      "dest": ".cursor/rules/closed-loop.mdc",
+      "docs": "https://cursor.com/docs/context/rules",
+      "kind": "file",
+      "src": "cursor.mdc"
+    },
+    "gemini": {
+      "agents": [
+        "gemini"
+      ],
+      "dest": "GEMINI.md",
+      "docs": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/gemini-md.md",
+      "kind": "block",
+      "src": "GEMINI.md"
+    },
+    "windsurf": {
+      "agents": [
+        "windsurf"
+      ],
+      "dest": ".windsurf/rules/closed-loop.md",
+      "docs": "https://docs.windsurf.com/windsurf/cascade/memories",
+      "kind": "file",
+      "src": "windsurf-closed-loop.md"
+    }
+  },
+  "sha256": "87142ff46f9c21162d5c021cf75d36336cb64d6849ce7ff75cdc87fd1cea2728",
+  "source": "skill/SKILL.md"
+}

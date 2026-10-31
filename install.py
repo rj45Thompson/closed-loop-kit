@@ -10,6 +10,11 @@ then every selftest and the whole loop on the examples proved, several at once, 
     python closed_loop.py prove            (in the tools folder, after an install) prove it all again, or `prove --quick`; see its result
     python install.py --check              check only: nothing is copied
     python install.py --uninstall          remove what an install put down (it touches nothing else)
+    python install.py --agent NAME         write the skill in the layout another coding agent reads, into THIS project, and touch nothing else.
+                                           NAME is codex, opencode or agents (AGENTS.md), cursor (.cursor/rules/closed-loop.mdc), gemini (GEMINI.md),
+                                           copilot (.github/copilot-instructions.md) or windsurf (.windsurf/rules/closed-loop.md). No other agent has
+                                           been tried: these files are the layouts their documentation names, generated from skill/SKILL.md at build time.
+    closed-loop-kit install ...            the same installer, from the pip package (pipx run / uvx), which has no clone
 
 Needs: Python 3.10+ and PyYAML. Optional, each named if absent: PyTorch (the GNN link proposer), scikit-learn (ranking which holes to
 show first), the .NET SDK (the C# adapter and the example and the C# equivalence check by IL, built with dotnet itself). Without an
@@ -18,17 +23,25 @@ optional piece the rest still runs; what it would have done is said, never faked
 import argparse
 import importlib
 import importlib.util
+import hashlib
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 
 KIT = os.path.dirname(os.path.abspath(__file__))
+# in a clone the tools are KIT/tools; in the pip package this file sits in the tools folder itself
+SRC = os.path.join(KIT, "tools") if os.path.isfile(os.path.join(KIT, "tools", "closed_loop.py")) else KIT
 HOME = os.path.expanduser("~")
-TOOLS = ["usecase_model.py", "doc_nodes.py", "usecase_kg.py", "closed_loop.py", "prove.py", "grow.py", "ask.py", "source_rules.py", "cs_effect_check.py", "py_effect_check.py", "graph_gnn.py",
+TOOLS = ["usecase_model.py", "doc_nodes.py", "usecase_kg.py", "closed_loop.py", "prove.py", "grow.py", "ask.py", "elicit.py", "source_rules.py", "cs_effect_check.py", "py_effect_check.py", "graph_gnn.py",
          "ab_loop.py", "grade_panel.py", "loop_stats.py", "improvement.py", "improvement/stat_requirements.yaml", "buzzsaw.py",
          "loop_tick.py", "TICK.md", "run_plan.py", "telemetry_audit.py", "survivor_rank.py", "gnn_tasks.py", "gnn_more.py", "gnn_curve.py", "graph_flythrough.py", "gnn_goals.py", "gnn_goals.yaml",
          "il_bodies/il_bodies.csproj", "il_bodies/Program.cs", "STATS.md"]
+LF, CRLF = chr(10), chr(13) + chr(10)
+
+
 def say(ok, what, why=""):
     print("  %-4s %s%s" % ({True: "ok", False: "FAIL", None: "--"}[ok], what, ("  (" + why + ")") if why else ""))
     return ok
@@ -64,7 +77,7 @@ def install(dest, skills):
     os.makedirs(dest, exist_ok=True)
     for f in TOOLS:
         os.makedirs(os.path.dirname(os.path.join(dest, f)), exist_ok=True)
-        shutil.copy2(os.path.join(KIT, "tools", f), os.path.join(dest, f))
+        shutil.copy2(os.path.join(SRC, f), os.path.join(dest, f))
     for ex in ("example", "example_py", "example_grow"):
         if os.path.exists(os.path.join(dest, ex)):
             shutil.rmtree(os.path.join(dest, ex))
@@ -91,6 +104,62 @@ def prove(dest, quick):
     return subprocess.run(cmd, cwd=dest).returncode
 
 
+def install_agent(name, project):
+    """Write the skill in the layout agent `name` reads, into `project`, and touch nothing else (no tools, no skill folder, no proof run). The layouts
+    are cut from skill/SKILL.md at build time (agents/, with layouts.json saying where each goes); here only the stamp is checked, so a SKILL.md edited
+    after the build is refused and not served as a stale copy. A file the project may own (AGENTS.md, GEMINI.md, copilot-instructions.md) gets a block between
+    two marker comments, replaced when present and appended when not, the rest of the file untouched. A file that is ours alone (Cursor, Windsurf) is
+    written when absent or already ours, and refused when it is somebody's. Returns 0 written or already current, 1 refused, 2 not possible here."""
+    agents = os.path.join(KIT, "agents")
+    try:
+        doc = json.load(open(os.path.join(agents, "layouts.json"), encoding="utf-8"))
+        skill = open(os.path.join(KIT, "skill", "SKILL.md"), encoding="utf-8", newline="").read()
+    except (OSError, ValueError) as e:
+        print("No agent layouts here (%s). They are written by the kit's build (agent_layouts.py)." % e)
+        return 2
+    by_name = {a: k for k, v in doc["layouts"].items() for a in v["agents"]}
+    if name not in by_name:
+        print("Unknown agent %r. Choose one of: %s" % (name, ", ".join(sorted(by_name))))
+        return 2
+    lay = doc["layouts"][by_name[name]]
+    have = hashlib.sha256(skill.replace(CRLF, LF).encode("utf-8")).hexdigest()
+    src = open(os.path.join(agents, lay["src"]), encoding="utf-8", newline="").read()
+    if doc.get("sha256") != have or ("sha256=" + have) not in src:
+        print("Refused: the %s layout was cut from an older skill/SKILL.md than the one beside it. Rebuild the kit (build_kit.py) and install again." % lay["src"])
+        return 2
+    dest = os.path.join(project, *lay["dest"].split("/"))
+    begin = re.compile(r"<!-- closed-loop:begin [^>]*-->")
+    end = "<!-- closed-loop:end -->"
+    old = open(dest, encoding="utf-8", newline="").read() if os.path.isfile(dest) else None
+    nl = CRLF if old and CRLF in old else LF
+    mine = src.replace(CRLF, LF)
+    if lay["kind"] == "file":
+        if old is not None and not begin.search(old):
+            print("Refused: %s exists and is not ours (it carries no closed-loop block). Nothing was changed; move it or merge by hand." % lay["dest"])
+            return 1
+        new = mine.replace(LF, nl)
+    elif old is None:
+        new = mine.replace(LF, nl)
+    else:
+        m = begin.search(old)
+        e = old.find(end) if m else -1
+        if m and e < m.start():
+            print("Refused: %s holds a closed-loop begin marker with no end marker after it. Nothing was changed." % lay["dest"])
+            return 1
+        block_text = mine[mine.index("<!-- closed-loop:begin"):].rstrip(LF).replace(LF, nl)
+        if m:
+            new = old[:m.start()] + block_text + old[e + len(end):]
+        else:
+            new = old.rstrip(CRLF) + nl + nl + block_text + nl
+    if new == old:
+        print("Already current: %s" % dest)
+        return 0
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    open(dest, "w", encoding="utf-8", newline="").write(new)
+    print("%s %s for %s. Nothing else was touched." % ("Updated" if old is not None else "Wrote", dest, name))
+    return 0
+
+
 def uninstall(dest, skills):
     mark = os.path.join(dest, ".installed")
     if not os.path.exists(mark):
@@ -110,9 +179,13 @@ def main(argv):
     ap.add_argument("--skills", default=os.path.join(HOME, ".claude", "skills"))
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--uninstall", action="store_true")
+    ap.add_argument("--agent", help="write the skill in the layout of another coding agent into this project and do nothing else: codex, opencode, agents, cursor, gemini, copilot or windsurf")
+    ap.add_argument("--project", default=".", help="--agent: the project folder (default: the current one)")
     ap.add_argument("--quick", action="store_true", help="only the front door (grow and ask): its selftests and its acceptance run, about a minute; the rest of the loop is not proved")
     a = ap.parse_args(argv)
     dest, skills = os.path.abspath(a.dest), os.path.abspath(a.skills)
+    if a.agent:
+        return install_agent(a.agent, os.path.abspath(a.project))
     if a.uninstall:
         return uninstall(dest, skills)
     ok, opt = check_needs()

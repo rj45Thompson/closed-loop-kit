@@ -368,7 +368,20 @@ class UseCaseModel(object):
                     item = dict(item)
                     item["_file"] = os.path.relpath(f, folder)
                     data[key].append(item)
-        return cls.from_data(meta, data, root=folder)
+        m = cls.from_data(meta, data, root=folder)
+        m.merge_recorded_checks()
+        return m
+
+    def merge_recorded_checks(self):
+        """the tests a pass's verdicts show catching each requirement's breaks (record_checks.py writes <model>/record_checks.json from them): added to
+        what a requirement names itself, never replacing it. An id the model no longer holds is ignored here and listed by record_checks --check"""
+        path = os.path.join(self.root, "record_checks.json")
+        if not os.path.isfile(path):
+            return
+        for rid, names in (json.load(io.open(path, encoding="utf-8")).get("checks") or {}).items():
+            if rid in self.requirements:
+                r = self.requirements[rid]
+                r.checks = sorted(set(r.checks) | set(str(n) for n in names))
 
     @classmethod
     def from_data(cls, meta, data, root="."):

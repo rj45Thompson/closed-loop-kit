@@ -5,6 +5,27 @@ Test the requirements an AI acts on, then hold them to the code, the tests and t
 **This is a prototype**, by RJ Thompson, shared to be tried and benchmarked. Its own requirements are a model the loop runs on itself,
 and that model still names holes. Read [the limits](#honest-limits) before you trust a green report.
 
+**Where the evidence stands.** On the one end-to-end test so far, agents building a complete program from a written brief, with the loop and without it, graded against tests the
+agents never saw, **the loop did not beat a plain agent asking good questions**: the scores were the same within the margin and the loop cost more tokens and minutes, a sign and not a measure. It did what it
+is built to do, and that was not enough. Its tests held the code to each agent's own reading of the brief, wrong parts included, so a requirement that came in wrong was defended as
+firmly as a right one; what moved the score most was how complete and how correct the requirements were that the agent was given, and no check that runs later can see a requirement that came in wrong. So the kit now asks for the rules
+first, from the person who holds them (`elicit.py`), and closes the loop last and once. The narrower claims it can back are further down: it shows what your tests hold and where no
+test looks, and it keeps a record of where each requirement came from. Whether it pays on a large system held across many changes has not been measured.
+
+## Run it with no clone
+
+Python 3.10 or newer and nothing else installed first. This runs the shipped Python example through the whole loop in a temporary folder and must end `HOLDS`:
+
+```
+uvx --from git+https://github.com/rj45Thompson/closed-loop-kit closed-loop-kit try
+pipx run --spec git+https://github.com/rj45Thompson/closed-loop-kit closed-loop-kit try
+```
+
+`closed-loop-kit` (alias `closed-loop`) is the package's one command. `grow`, `ask`, `run` and `prove` are its subcommands (the same as `closed_loop.py` below), `install` is the
+installer in [Install](#install), and `tool NAME` runs any other shipped tool. It is not on a package index yet: that needs the owner's account, so there is no bare `uvx closed-loop-kit`
+until it is published (from a built kit, `uv build`, then `uv publish`). The git address works once this repository carries the files; until then the same command takes a path to
+a built kit or a wheel in place of the address.
+
 - **The manual:** <https://rj45thompson.github.io/anchor-demo/harness/fly/>
 - **Results on code anyone can check:** <https://rj45thompson.github.io/anchor-demo/harness/public-code/>
 
@@ -35,6 +56,8 @@ once it has written the model and 1 when it refused the draft; `ask` exits 1 whi
 then a need nobody authored, a vague word or an uncaptured sentence of your text, a goal with no alternate path, and last the fields of a goal; inside a kind, the answer more of the chain rests on first. The shipped `example_grow/` holds the wallet brief with a draft, and a PRD, a ticket export and a
 transcript with a draft each.
 
+**If someone can be asked, ask first: `elicit.py`.** `grow` and `ask` start from text. When the rules are in a person's head, start from the person. `elicit.py` crosses every act, thing and stage the text and the interface name with what must be known about each (who, when, when not, what follows, may it be passed, what changes near the end, what counts, what is equal, what if it is claimed and is not there), and asks in batches. It holds each rule to two hearings in different forms, keeps a rule open while an answer disagrees with it, and does not take one "not specified" as final. `check` says what is open. The reason is measured and it is a limit of the loop itself: a closed loop holds a wrong requirement as tightly as a right one, and tests written from the same reading as the code cannot tell them apart. So the rules have to be right before the loop closes. The closing then comes last, as one pass: `elicit.py breaks` runs every break of the finished code against the tests, with no model, and a break they miss is read as a question. The skill's first section gives the order.
+
 It borrows ideas, none of its code: Spec Kit's clarify step (MIT), BMAD-METHOD's analyst brainstorming (MIT), Superpowers' one-question-at-a-time brainstorming (MIT), OpenSpec's explore step (MIT), Agent OS's shaping
 questions (MIT), Task Master's parse of a requirements document into tasks (MIT with the Commons Clause, so the idea only), SpecTrace's import of requirements from specs (MIT). Kiro and Claude Code's question tool
 are proprietary: idea only. What this adds is that a requirement carries its sentence or its reason and a program checks it.
@@ -57,6 +80,7 @@ What is in the box:
 - **The model:** use cases and requirements as YAML, checked by 19 rules (`usecase_model.py`).
 - **The graph:** requirements, steps, code places, breaks, tests and argument steps as nodes in SQLite, held by 18 criteria, each proved
   by a planted mistake in its selftest (`usecase_kg.py`).
+- **Asking** (`elicit.py`): the rules from the person who holds them, widely and twice, before any code. Above.
 - **The front door** (`grow.py`, `ask.py`): from text someone already wrote to a first model and the questions that grow it, with no key and no .NET. Above.
 - **The one command:** `closed_loop.py run` does all of it and writes a report.
 - **The documents as nodes** (`doc_nodes.py`): declare your documents and each section becomes a node, linked from what it names literally or from a line
@@ -70,7 +94,7 @@ What is in the box:
 - **An on/off harness** (`ab_loop.py`, `grade_panel.py`) that measures agents with the loop against agents without it, graded blind.
 - **Telemetry** (`loop_stats.py`, `STATS.md`) whose trends pick the next improvement, and a page you can fly through to see any graph
   the loop wrote (`graph_flythrough.py`).
-- **A skill for Claude Code** (`skill/SKILL.md`). The tools are plain command-line Python and run without it.
+- **A skill for Claude Code** (`skill/SKILL.md`), and the same front door in the file layouts of other coding agents ([below](#other-coding-agents)). The tools are plain command-line Python and run without either.
 
 ## When to use it
 
@@ -104,6 +128,23 @@ It runs every selftest and the whole loop on the examples, several at once at be
 answer, and what was not run and why. A selftest that needs a piece the machine lacks (PyTorch, scikit-learn) says so and is never counted as passed; so is an example that needs the .NET SDK. A
 selftest that hangs is killed and named; one that exits 0 having checked nothing is named and is not a pass. On Python and PyYAML alone the Python example and every selftest that needs nothing else
 run. Measured on a clean Windows home folder, on a machine other work was using: 28 to 62 seconds with Python and PyYAML alone, and 5 to 8 minutes the first time with PyTorch and the .NET SDK, most of it the C# example, whose first build downloads about 250 MB of packages.
+
+### Other coding agents
+
+The skill is written for Claude Code. `python install.py --agent NAME` (or `closed-loop-kit install --agent NAME`) writes the same front door (`grow`, `ask`), `run` and `prove` in the
+file another agent reads, into the current project, and touches nothing else: no tools, no skill folder, no proof run.
+
+- `codex`, `opencode`, `agents`: `AGENTS.md`, read by Codex, OpenCode and others that read AGENTS.md.
+- `cursor`: `.cursor/rules/closed-loop.mdc`, a Cursor rule the agent applies when its description fits.
+- `gemini`: `GEMINI.md`, read by Gemini CLI.
+- `copilot`: `.github/copilot-instructions.md`, read by GitHub Copilot.
+- `windsurf`: `.windsurf/rules/closed-loop.md`, a Windsurf model-decision rule. Windsurf's documentation now lists that folder as legacy but imported by default.
+
+A file you already own (`AGENTS.md`, `GEMINI.md`, `copilot-instructions.md`) gets one block between two marker comments, replaced when it is there and appended when not; the rest is
+left alone. A Cursor or Windsurf file of that name that is not ours is refused. The files are generated at build time from `skill/SKILL.md`, the one source, and carry its hash: `install.py --agent` refuses a file cut from an older SKILL.md. Each layout was
+checked against that tool's own documentation (the pages, and the date they were read, are in `agents/layouts.json`). **No agent other than Claude Code has been tried:** these are the files the
+documentation says each reads, valid and in the right place, and nobody has watched one of those agents follow them. The idea of one source written out in many agents' layouts is
+seen in OpenSpec and Superpowers (both MIT); no code is taken from either.
 
 ## Try it
 
@@ -184,6 +225,7 @@ where no test looks.
   walks each step, and from vague words in the text; the holes the tool finds by itself (a goal with no alternate path, the fields of a goal) are mostly questions a producer of a rough epic has little to say about.
   On two invented games, an agent told to ask clarifying questions, with no kit, reached more of the producer's rules than the queue did (one run each, a sign and not a measure). What the queue adds
   is the record (every requirement has its sentence or its reason, every answer its source, nothing is asked twice, a session resumes), and that is all it claims.
+- **The loop cannot tell a wrong requirement from a right one.** Every break caught means the tests hold the code to the requirements as the agent read them. If the reading is wrong, the tests defend it. That is why asking comes first, and asking only moves the risk: a rule that two hearings agree on can still be wrong, and `elicit.py` cannot judge whether a person's answer is true, only whether their answers agree.
 - **Two holes cannot be answered ABSENT in the rules.** The 19 rules have no place for "this goal has no alternate path, and here is why" or "there is no separate way to see the result"; those answers are
   recorded and the question closes, and the rules still list the hole, which the tool says.
 

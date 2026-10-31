@@ -5,7 +5,8 @@ WHY (10-30): to show the node graph, how it is laid out and how it maps code to 
 is the record, and it had no picture: its only readers were queries. This lays out what the store holds and invents nothing: every node
 and edge on the page is a row in the sqlite the loop wrote, and the tour follows one thread that really runs through it, from a source
 to a requirement, the step that needs it, Claude's written reasoning about it, the code, a branch, a break of that branch and the test
-that caught it. A break no test caught glows red.
+that caught it. A break glows by what the verdict record says of it: red when it got past every test, violet when the record holds no verdict for it (it did not build,
+or no test covers its file), and the plain colour of its layer when a test caught it. A break is never red for want of a verdict.
 
   GraphLayout  the store's nodes and edges, placed: a layer by kind, an angle by the code each node belongs to
   Tour         the one real thread the page flies along; refuses to invent one when the graph holds none
@@ -46,7 +47,8 @@ LAYERS = [("source", 96, 46, 6, "#F4F2EC", 5), ("actor", 96, 30, 4, "#F4F2EC", 4
           ("space", 12, 28, 0, "#5B6875", 3), ("name", 8, 40, 6, "#5B6875", 3), ("code", 0, 118, 0, "#7FB2E5", 9),
           ("assertion", -18, 128, 5, "#9CD0FF", 3), ("cell", -24, 130, 8, "#4FA3D9", 3), ("mutant", -54, 146, 22, "#5C7C99", 2),
           ("test", -92, 84, 0, "#8BE28B", 7)]
-SURVIVED = "#FF4D4D"
+SURVIVED = "#FF4D4D"   # a break the record says got past every test
+UNRUN = "#B48CFF"      # a break the record holds no verdict for: not a survivor, and not shown as one
 INFERRED = "#FFF0A0"   # a requirement the walk inferred, against the orange of the ones people wrote
 REL_COLOUR = {"maps to": "#F08A3C", "cites": "#7FE0C3", "binds requirement": "#C9B6F2", "infers requirement": "#C9B6F2", "stated by": "#F4F2EC",
               "is at": "#7FB2E5", "mutated as": "#4FA3D9", "killed by": "#3E6B4E", "checked by": "#8BE28B", "has step": "#C9B6F2"}
@@ -101,15 +103,23 @@ def circular_mean(angles, default):
 
 
 class GraphLayout(object):
-    """The store's nodes and edges with a place for each: a layer by kind, an angle by the code it belongs to"""
+    """The store's nodes and edges with a place for each: a layer by kind, an angle by the code it belongs to. `layers` and `not_drawn` default to the product graph's; a store that holds
+    more kinds (the combined store of the learned parts holds jobs and stats) passes its own, so a kind with a layer is drawn where its row says and not as an unlabelled grey ring"""
 
-    def __init__(self, store, hide=None, anonymous=False):
+    def __init__(self, store, hide=None, anonymous=False, not_drawn=NOT_DRAWN, layers=LAYERS):
         db = sqlite3.connect(store)
         self.hide = re.compile(hide) if hide else None
         self.anonymous = anonymous
+        self.layers = layers
         self.prop = dict(db.execute("select id,label from prop"))
-        self.nodes = {i: {"id": i, "kind": k, "label": l or "", "sub": s} for i, k, l, s in db.execute("select id,kind,label,sub from entity") if k not in NOT_DRAWN}
+        self.nodes = {i: {"id": i, "kind": k, "label": l or "", "sub": s} for i, k, l, s in db.execute("select id,kind,label,sub from entity") if k not in not_drawn}
         self.edges = sorted({(s, self.prop.get(p, str(p)), o) for s, p, o in db.execute("select s,p,o from edge") if s in self.nodes and o in self.nodes})
+        # the verdict a break carries as a literal (usecase_kg writes killed, survived or no verdict on every mutant); a store without the table says nothing
+        try:
+            said = db.execute("select l.s, l.v from literal l join prop p on p.id = l.p where p.label = 'verdict'").fetchall()
+        except sqlite3.OperationalError:
+            said = []
+        self.verdict = {s: v for s, v in said if s in self.nodes and self.nodes[s]["kind"] == "mutant"}
         db.close()
         self.out = collections.defaultdict(list)
         self.into = collections.defaultdict(list)
@@ -122,8 +132,20 @@ class GraphLayout(object):
     def of_kind(self, kind):
         return sorted(i for i, n in self.nodes.items() if n["kind"] == kind)
 
+    def break_state(self, node_id):
+        """None for a node that is no break; else caught, got past or no verdict, from the store's record. A break is CAUGHT with a killed-by edge or a killed verdict, GOT PAST only when
+        the record says survived, and holds NO VERDICT otherwise: nothing says it got past, so it is not drawn as one (1443 red when 205 were real, measured 10-30)"""
+        if self.nodes[node_id]["kind"] != "mutant":
+            return None
+        if node_id in self.killed or self.verdict.get(node_id) == "killed":
+            return "caught"
+        return "got past" if self.verdict.get(node_id) == "survived" else "no verdict"
+
     def survived(self, node_id):
-        return self.nodes[node_id]["kind"] == "mutant" and node_id not in self.killed
+        return self.break_state(node_id) == "got past"
+
+    def unrun(self, node_id):
+        return self.break_state(node_id) == "no verdict"
 
     def neighbour_angles(self, node_id, angle):
         return [angle[o] for _, o in self.out[node_id] if o in angle] + [angle[s] for _, s in self.into[node_id] if s in angle]
@@ -140,14 +162,15 @@ class GraphLayout(object):
                 base = angle[at[0]] if at else 2 * math.pi * hash01(i)
                 angle[i] = base + (hash01(i + "a") - 0.5) * sector * 0.9
         # the rest settle where what they touch is, the even kinds spaced on their ring so a popular angle does not pile them up
-        for kind in ("requirement", "test", "step", "extension", "use case", "chain step", "chain", "question", "source", "actor", "name", "space"):
+        settled = ("requirement", "test", "step", "extension", "use case", "chain step", "chain", "question", "source", "actor", "name", "space")
+        for kind in settled + tuple(row[0] for row in self.layers if row[0] not in settled and row[0] not in ("code", "cell", "assertion", "mutant")):
             ids = self.of_kind(kind)
             means = sorted(ids, key=lambda i: circular_mean(self.neighbour_angles(i, angle), 2 * math.pi * hash01(i)))
             for rank, i in enumerate(means):
                 mean = circular_mean(self.neighbour_angles(i, angle), 2 * math.pi * hash01(i))
                 even = -math.pi + 2 * math.pi * rank / max(1, len(ids))
                 angle[i] = circular_mean([mean, even], even)
-        layer = {row[0]: row for row in LAYERS}
+        layer = {row[0]: row for row in self.layers}
         for i, n in self.nodes.items():
             kind, height, radius, spread, _, _ = layer.get(n["kind"], ("other", -110, 60, 10, "#5B6875", 2))
             r = radius + (hash01(i + "r") - 0.5) * 2 * spread
@@ -257,7 +280,7 @@ def data(layout, title, hero=False, readers=None):
         n = g.nodes[i]
         pos += [round(n["x"], 1), round(n["y"], 1), round(n["z"], 1)]
         kind.append(kinds.index(n["kind"]) if n["kind"] in kinds else len(kinds) - 1)
-        flag.append(1 if g.survived(i) else 2 if n["kind"] == "requirement" and n["sub"] == "inferred" else 0)
+        flag.append(1 if g.survived(i) else 3 if g.unrun(i) else 2 if n["kind"] == "requirement" and n["sub"] == "inferred" else 0)
     rels = sorted({p for _, p, _ in g.edges})
     edges = []
     for s, p, o in g.edges:
@@ -283,8 +306,30 @@ def data(layout, title, hero=False, readers=None):
     return {**extra, "title": title, "hero": hero, "roles": ROLES if g.anonymous else None, "pos": pos, "kind": kind, "flag": flag, "edges": edges, "labels": labels, "stops": stops, "kinds": kinds,
             "colour": [colours.get(k, "#5B6875") for k in kinds], "size": [sizes.get(k, 2) for k in kinds], "rels": rel_names,
             "relColour": [REL_COLOUR.get(r, OTHER_EDGE) for r in rels], "relWeight": [round(min(1.0, math.sqrt(BRIGHT_EDGES / float(per_rel[r]))), 3) for r in rels],
-            "survived": SURVIVED, "inferred": INFERRED, "counts": counts, "nodes": len(ids), "edgeCount": len(g.edges), "survivors": flag.count(1), "views": views}
+            "survived": SURVIVED, "unrun": UNRUN, "inferred": INFERRED, "counts": counts, "nodes": len(ids), "edgeCount": len(g.edges), "survivors": flag.count(1), "noVerdict": flag.count(3),
+            "legend": legend(counts, flag.count(1), flag.count(3), sum(1 for i in ids if g.break_state(i) == "caught")), "views": views}
 
+
+# the legend names only what the graph holds (the osu page named a chain it has none of): a group shows when one of its kinds is present, and says only its present parts
+LEGEND_GROUPS = [("#F08A3C", "Why", [("sources", {"source", "actor"}), ("requirements", {"requirement", "question"}), ("use cases", {"use case", "step", "extension"})]),
+                 ("#7FE0C3", "Reasoning", [("Claude's chain, each step citing what it stands on", {"chain", "chain step"})]),
+                 ("#7FB2E5", "What", [("the code, method by method", {"code", "space", "name"})]),
+                 ("#8BE28B", "Proof", [("branches", {"cell", "assertion"}), ("every break", {"mutant"}), ("the tests", {"test"})])]
+
+
+def legend(counts, got_past, no_verdict, caught):
+    """[colour, name, words] for each group of kinds the graph holds, then one line for each state of a break it holds"""
+    out = []
+    for colour, name, parts in LEGEND_GROUPS:
+        here = [words for words, kinds in parts if any(counts.get(k) for k in kinds)]
+        if here:
+            out.append([colour, name, ", ".join(here)])
+    for n, colour, name, words in ((caught, [r for r in LAYERS if r[0] == "mutant"][0][4], "A break a test caught", "its colour is the layer's"),
+                                   (got_past, SURVIVED, "A break that got past every test", "red"),
+                                   (no_verdict, UNRUN, "A break with no verdict", "it did not build, or no test covers its file")):
+        if n:
+            out.append([colour, name, "%s: %d" % (words, n)])
+    return out
 
 STYLE = r"""<style>
 :root { --bg:#0B1219; --panel:rgba(16,26,36,.86); --fg:#F4F2EC; --muted:#A9B7C4; --line:#2E4052; --accent:#F08A3C; color-scheme:dark }
@@ -324,8 +369,8 @@ const D = /*DATA*/;
 const $ = (id) => document.getElementById(id);
 const HERO = D.hero, stage = $('stage');
 if(!HERO) $('t').textContent = D.title;
-$('s').textContent = (HERO?D.title+': ':'') + D.nodes.toLocaleString('en') + ' nodes, ' + D.edgeCount.toLocaleString('en') + ' edges, ' + D.survivors.toLocaleString('en') + ' breaks no test caught (red)';
-const legend = [['#F08A3C','Why','sources, requirements, use cases'],['#7FE0C3','Reasoning',"Claude's chain, each step citing what it stands on"],['#7FB2E5','What','the code, method by method'],['#8BE28B','Proof','branches, every break, the tests']];
+$('s').textContent = (HERO?D.title+': ':'') + D.nodes.toLocaleString('en') + ' nodes, ' + D.edgeCount.toLocaleString('en') + ' edges, ' + D.survivors.toLocaleString('en') + ' breaks that got past every test (red)' + (D.noVerdict?', ' + D.noVerdict.toLocaleString('en') + ' with no verdict (violet)':'');
+const legend = D.legend;
 for (const [c,a,b] of legend) { const d = document.createElement('div'); const s = document.createElement('span'); s.className='dot'; s.style.background=c; const i = document.createElement('b'); i.textContent=a; d.append(s,i,document.createTextNode(': '+b)); $('layers').append(d); }
 let renderer=null; try { renderer=new THREE.WebGLRenderer({canvas:$('c'),antialias:true,preserveDrawingBuffer:true}); } catch(e) { console.error(e); }
 if(!renderer){ $('ct').textContent='The graph could not be drawn'; $('cx').textContent='This browser did not start WebGL, so there is no graph to show.'; $('ctl').querySelectorAll(':scope > :not(a)').forEach((x)=>{ x.style.display='none'; }); throw new Error('no WebGL: the graph is not drawn'); }
@@ -346,8 +391,8 @@ const pointShader = { uniforms:{scale:{value:600},time:{value:0}}, transparent:t
   fragmentShader:'varying vec3 vC; void main(){ float d=length(gl_PointCoord-vec2(.5))*2.0; float a=smoothstep(1.0,.15,d); gl_FragColor=vec4(vC*(0.55+0.9*a*a),a); }' };
 const nodeMat = new THREE.ShaderMaterial(pointShader);
 const nodeSize=new Float32Array(N);
-{ const pos=new Float32Array(D.pos), col=new Float32Array(N*3); const cs=D.colour.map((c)=>new THREE.Color(c)), red=new THREE.Color(D.survived), inf=new THREE.Color(D.inferred);
-  for (let i=0;i<N;i++){ const c=D.flag[i]===1?red:D.flag[i]===2?inf:cs[D.kind[i]]; col[3*i]=c.r; col[3*i+1]=c.g; col[3*i+2]=c.b; }
+{ const pos=new Float32Array(D.pos), col=new Float32Array(N*3); const cs=D.colour.map((c)=>new THREE.Color(c)), red=new THREE.Color(D.survived), unrun=new THREE.Color(D.unrun), inf=new THREE.Color(D.inferred);
+  for (let i=0;i<N;i++){ const c=D.flag[i]===1?red:D.flag[i]===3?unrun:D.flag[i]===2?inf:cs[D.kind[i]]; col[3*i]=c.r; col[3*i+1]=c.g; col[3*i+2]=c.b; }
   var nodeGeo=new THREE.BufferGeometry(); nodeGeo.setAttribute('position',new THREE.BufferAttribute(pos,3)); nodeGeo.setAttribute('color',new THREE.BufferAttribute(col,3)); nodeGeo.setAttribute('size',new THREE.BufferAttribute(nodeSize,1));
   scene.add(new THREE.Points(nodeGeo,nodeMat)); }
 // a view keeps the relations and kinds it names: a line drawn black adds nothing, a point of size 0 draws nothing. What `lit` names stands out from all of it, dimmed so it can still be seen
@@ -359,7 +404,7 @@ function paint(){ const v=viewNow;
   const gain=(v.gain||(keepRel?1.8:1))*Number(new URLSearchParams(location.search).get('dim')||1);    // fewer lines on screen, so each can be brighter; a still can dim the rest so the thread reads
   for (let e=0;e<edgeCount;e++){ const r=D.edges[3*e+2], on=(!keepRel||keepRel.has(r))&&(!keepKind||(keepKind.has(D.kind[D.edges[3*e]])&&keepKind.has(D.kind[D.edges[3*e+1]]))), w=lit?(lit.rels.has(r)?Math.min(1,D.relWeight[r]*4):.07*D.relWeight[r]):on?Math.min(1,D.relWeight[r]*gain):0, c=relCol[r]; for (let k=0;k<2;k++){ edgeCol[6*e+3*k]=c.r*w; edgeCol[6*e+3*k+1]=c.g*w; edgeCol[6*e+3*k+2]=c.b*w; } }
   edgeGeo.attributes.color.needsUpdate=true;
-  for (let i=0;i<N;i++) nodeSize[i]=((!keepKind||keepKind.has(D.kind[i]))?(D.flag[i]===1?7:D.size[D.kind[i]]):0)*(lit&&!lit.kinds.has(D.kind[i])?.5:1);
+  for (let i=0;i<N;i++) nodeSize[i]=((!keepKind||keepKind.has(D.kind[i]))?(D.flag[i]===1?7:D.flag[i]===3?6:D.size[D.kind[i]]):0)*(lit&&!lit.kinds.has(D.kind[i])?.5:1);
   nodeGeo.attributes.size.needsUpdate=true;
   if(lit||wasLit){ const a=nodeGeo.attributes.color; for(let i=0;i<N;i++){ const f=lit&&!lit.kinds.has(D.kind[i])?.2:1; for(let k=0;k<3;k++) a.array[3*i+k]=nodeBase[3*i+k]*f; } a.needsUpdate=true; wasLit=!!lit; }
   onPaint(); }
@@ -794,22 +839,26 @@ def selftest():
     store = os.path.join(t, "g.sqlite")
     db = sqlite3.connect(store)
     db.executescript("create table prop(id integer primary key,label text,aliases text); create table entity(id text primary key,kind text,label text,sub text);"
-                     "create table edge(s text,p integer,o text,fam integer);")
+                     "create table edge(s text,p integer,o text,fam integer); create table literal(s text,p integer,v text);")
     rels = ["maps to", "is at", "mutated as", "killed by", "cites", "stated by", "binds requirement"]
     db.executemany("insert into prop values(?,?,'')", list(enumerate(rels)))
+    db.execute("insert into prop values(9,'verdict','')")
     nodes = [("source:SECRETNAME-1", "source", ""), ("req:R-1", "requirement", "the rule, by SECRETNAME"), ("step:U-1.1", "step", ""), ("chain step:C#1", "chain step", ""),
-             ("code:A.B", "code", ""), ("cell:S#b0", "cell", ""), ("mut:A.B: kept", "mutant", ""), ("mut:A.B: past", "mutant", ""), ("test:T1", "test", "")]
+             ("code:A.B", "code", ""), ("cell:S#b0", "cell", ""), ("mut:A.B: kept", "mutant", ""), ("mut:A.B: past", "mutant", ""), ("mut:A.B: unrun", "mutant", ""), ("test:T1", "test", "")]
     db.executemany("insert into entity values(?,?,?,'')", nodes)
     edges = [("cell:S#b0", 0, "req:R-1"), ("cell:S#b0", 1, "code:A.B"), ("cell:S#b0", 2, "mut:A.B: kept"), ("cell:S#b0", 2, "mut:A.B: past"), ("mut:A.B: kept", 1, "code:A.B"), ("mut:A.B: past", 1, "code:A.B"),
-             ("mut:A.B: kept", 3, "test:T1"), ("chain step:C#1", 4, "req:R-1"), ("chain step:C#1", 4, "code:A.B"), ("req:R-1", 5, "source:SECRETNAME-1"), ("step:U-1.1", 6, "req:R-1")]
+             ("mut:A.B: kept", 3, "test:T1"), ("chain step:C#1", 4, "req:R-1"), ("chain step:C#1", 4, "code:A.B"), ("req:R-1", 5, "source:SECRETNAME-1"), ("step:U-1.1", 6, "req:R-1"),
+             ("cell:S#b0", 2, "mut:A.B: unrun"), ("mut:A.B: unrun", 1, "code:A.B")]
     db.executemany("insert into edge values(?,?,?,1)", edges)
+    # the record's verdicts: one break caught, one got past, one with no verdict (it did not build). The plant: the third has no killed-by edge either, and was drawn red
+    db.executemany("insert into literal values(?,9,?)", [("mut:A.B: kept", "killed"), ("mut:A.B: past", "survived"), ("mut:A.B: unrun", "no verdict")])
     db.commit()
     db.close()
     out = os.path.join(t, "p.html")
     d = page(store, out, "T", hide="SECRETNAME")
     text = io.open(out, encoding="utf-8").read()
-    good = d["nodes"] == 9 and d["edgeCount"] == 11 and d["survivors"] == 1 and len(d["pos"]) == 27 and "SECRETNAME" not in text
-    print("selftest: PAGE every node and edge of the store is on the page, the break no test caught is flagged, a hidden name reaches no label %s" % ("PASS" if good else "FAIL"))
+    good = d["nodes"] == 10 and d["edgeCount"] == 13 and d["survivors"] == 1 and len(d["pos"]) == 30 and "SECRETNAME" not in text
+    print("selftest: PAGE every node and edge of the store is on the page, the break that got past every test is flagged, a hidden name reaches no label %s" % ("PASS" if good else "FAIL"))
     ok = good
     titles = [s["title"] for s in d["stops"]]
     want = ["The whole graph", "Where it comes from", "The requirement", "The step that needs it", "Claude's reasoning", "The code", "One decision", "Broken on purpose", "Caught", "And one that got past", "The whole graph"]
@@ -833,7 +882,7 @@ def selftest():
     d = page(store, out, "T", anonymous=True)
     text = io.open(out, encoding="utf-8").read()
     broken = [s["text"] for s in d["stops"] if not re.match(r'^[A-Z0-9"].*\.$', s["text"]) or re.search(r"  |: \.| ,|None", s["text"])]
-    good = all(n in named for n in names) and not any(n in text for n in names) and d["nodes"] == 9 and d["edgeCount"] == 12 and set(d["labels"].values()) == {""} \
+    good = all(n in named for n in names) and not any(n in text for n in names) and d["nodes"] == 10 and d["edgeCount"] == 14 and set(d["labels"].values()) == {""} \
         and [s["title"] for s in d["stops"]] == want and not broken and any(r.startswith("relation ") for r in d["rels"])
     print("selftest: ANONYMOUS no name from the store on the page, in a label, the tour or a relation, every node kept, the tour still whole sentences %s" % ("PASS" if good else "FAIL"))
     ok = ok and good
@@ -951,6 +1000,37 @@ def selftest():
     good = [s["title"] for s in d["stops"]] == ["The whole graph"]
     print("selftest: NO THREAD a graph with no reasoning gets the overview alone, never an invented thread %s" % ("PASS" if good else "FAIL"))
     ok = ok and good
+    # THREE STATES (a break is caught, got past every test, or has no verdict) read from the store's record. The plant is the old rule, a break without a killed-by edge painted red:
+    # the store holds two such breaks and only one of them got past, so that rule would have painted two
+    lay = GraphLayout(store)
+    states = sorted(lay.break_state(i) for i in lay.of_kind("mutant"))
+    old_red = sum(1 for i in lay.of_kind("mutant") if i not in lay.killed)
+    d = page(store, out, "T")
+    names_ = [row[1] for row in d["legend"]]
+    good = states == ["caught", "got past", "no verdict"] and old_red == 2 and d["survivors"] == 1 and d["noVerdict"] == 1 and d["flag"].count(1) == 1 and d["flag"].count(3) == 1         and {"A break a test caught", "A break that got past every test", "A break with no verdict"} <= set(names_)
+    ok = ok and good
+    print("selftest: STATES a break the record says caught, one that got past every test and one with no verdict are three states, and the one with no verdict is not red %s" % ("PASS" if good else "FAIL %s" % states))
+    # LEGEND names only what the graph holds: a Reasoning line with a chain in the graph, none without one; a state of a break only while a break is in it
+    had = "Reasoning" in names_
+    db = sqlite3.connect(store)
+    db.execute("delete from entity where kind = 'chain step'")
+    db.execute("update literal set v = 'killed' where v = 'no verdict'")
+    db.commit()
+    db.close()
+    d = page(store, out, "T")
+    names2 = [row[1] for row in d["legend"]]
+    good = had and "Reasoning" not in names2 and "A break with no verdict" not in names2 and "A break that got past every test" in names2 and "Why" in names2
+    ok = ok and good
+    print("selftest: LEGEND names a kind of thing, or a state of a break, only while the graph holds one %s" % ("PASS" if good else "FAIL %s %s" % (had, names2)))
+    db = sqlite3.connect(store)
+    db.execute("drop table literal")
+    db.commit()
+    db.close()
+    d = page(store, out, "T")
+    good = d["survivors"] == 0 and d["noVerdict"] == 2
+    ok = ok and good
+    print("selftest: NO RECORD a store that holds no verdicts paints no break red: nothing says one got past %s" % ("PASS" if good else "FAIL %s %s" % (d["survivors"], d["noVerdict"])))
+    ok = ok and good
     print("selftest: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 
@@ -976,7 +1056,7 @@ def main(argv):
         ap.error("--hero needs --headline")
     hero = Hero(a.headline, a.tagline, io.open(a.below, encoding="utf-8").read() if a.below else "", a.cue, a.description) if a.hero else None
     d = page(a.store, a.out, a.title, a.hide, a.anonymous, hero, a.goals)
-    print("graph_flythrough: %d nodes, %d edges, %d breaks no test caught, %d tour stops -> %s (%d KB)" % (d["nodes"], d["edgeCount"], d["survivors"], len(d["stops"]), a.out, os.path.getsize(a.out) // 1024))
+    print("graph_flythrough: %d nodes, %d edges, %d breaks got past every test, %d with no verdict, %d tour stops -> %s (%d KB)" % (d["nodes"], d["edgeCount"], d["survivors"], d["noVerdict"], len(d["stops"]), a.out, os.path.getsize(a.out) // 1024))
     return 0
 
 

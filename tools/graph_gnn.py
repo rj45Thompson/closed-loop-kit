@@ -63,7 +63,7 @@ class TooThin(RuntimeError):
 
 
 def too_thin(view):
-    """the reason this view cannot be folded by method, or None. The floor is the one the proof ladder holds a goal to (gnn_proof.LinkGoal.absent; its selftest holds the two alike)"""
+    """the reason this view cannot be folded by method, or None. The floor is the one the proof ladder holds a goal to (the ladder's own rule for a goal with too few links; its selftest holds the two alike)"""
     units = {view.place.get(c) for c, _ in view.links}
     if len(view.links) < FLOOR_LINKS or len(units) < FLOOR_UNITS or len(view.reqs) < FLOOR_ANSWERS:
         return "%d links, %d methods, %d candidates (needs %d, %d, %d)" % (len(view.links), len(units), len(view.reqs), FLOOR_LINKS, FLOOR_UNITS, FLOOR_ANSWERS)
