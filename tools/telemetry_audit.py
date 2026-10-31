@@ -314,7 +314,9 @@ def selftest():
         {"time": "x", "holes_ours": 1, "graph_nodes": 5, "never_read_anywhere": 3,
          # three ways the first audit took a name for a reader (MEASURED 10-30: it said 6 UNREAD while 11 were): `effects` is named
          # only in a selftest's fixture, `wins` is read by run_plan from ANOTHER record, `coverage` is an area's NAME, not a stat
-         "effects": 1, "wins": 1, "coverage": 1, "requirements": 1}) + "\n")
+         "effects": 1, "wins": 1, "coverage": 1, "requirements": 1,
+         # what a pass records about the public pages against their records (claims.py): read by NextImprovement's `documents` area
+         "doc_claims_stale": 0, "doc_numbers_unsourced": 488}) + "\n")
     io.open(os.path.join(t, "nobody.jsonl"), "w", encoding="utf-8").write("{}\n")
     io.open(os.path.join(t, "gnn_curve.jsonl"), "w", encoding="utf-8").write(json.dumps({"gnn": 0.5, "graph": "g"}) + "\n")
     io.open(os.path.join(t, "gnn_tasks.jsonl"), "w", encoding="utf-8").write(json.dumps({"graph": "g", "shape": {
@@ -335,7 +337,7 @@ def selftest():
     rd = reading(pf)
     names_only = "plant_only" not in rd and "written_only" not in rd and "dict_key_only" not in rd and "really_read" in rd and "read_too" in rd
     stats_of_areas, _ = areas_and_kinds()
-    areas_right = "holes_ours" in stats_of_areas and "tests" not in stats_of_areas
+    areas_right = "holes_ours" in stats_of_areas and "tests" not in stats_of_areas and {"doc_claims_stale", "doc_numbers_unsourced"} <= stats_of_areas
     m = out["morph log (stats.jsonl)"]
     good = m["holes_ours"] == "DECIDES" and m["graph_nodes"] == "WATCHED" and m["never_read_anywhere"] == "UNREAD" and m["time"] == "IDENTITY"
     good = good and unread >= 1 and doc_is_no_reader and m.get("covered_by_a_trigger") == "TRIGGERED" \
@@ -345,7 +347,7 @@ def selftest():
     ev = out.get("gnn_tasks.jsonl", {})
     # none of these may pass for read: a plant's fixture, another record's reader, an area's name
     false_readers = {f: m.get(f) for f in ("effects", "wins", "coverage") if m.get(f) != "UNREAD"}
-    good2 = not false_readers and names_only and areas_right and m.get("requirements") == "WATCHED" and ev.get("shape.requirements") == "DECIDES" \
+    good2 = not false_readers and names_only and areas_right and m.get("doc_claims_stale") == "DECIDES" and m.get("doc_numbers_unsourced") == "DECIDES" and m.get("requirements") == "WATCHED" and ev.get("shape.requirements") == "DECIDES" \
         and ev.get("shape.covered_by_a_trigger") == "TRIGGERED" and ev.get("shape.never_in_a_reader") == "UNREAD" \
         and ev.get("jobs.owner as today") == "DECIDES" and ev.get("jobs.only_a_plant_job") == "UNREAD"
     good3 = plan_lines_checked(t)

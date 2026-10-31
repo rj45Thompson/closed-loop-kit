@@ -16,6 +16,10 @@ THE EVIDENCE it reads (each written by the tool that measured it; nothing here i
   <kg>/gnn_curve.jsonl and gnn_curve_*.jsonl beside the tools   gnn_curve.py: the GNN against the plain rules by fullness
   <kg>/survivor_rank.jsonl   survivor_rank.py eval: the learned break order against the operator prior
   ~/.claude/ab/results.jsonl with runs/*/profile.json   ab_loop.py: loop on against off, by the kind of task (PK-6)
+EVERY SEED (board E1-3c). The plan reads every seed measured on the graph as it is, by the network as it is, and a line is on only if it wins by more than the margin at EVERY one of them. One seed
+flatters: on the self model the learned break order won at 9 of 10 seeds and lost at seed 0, so reading the last row flipped with the order the rows were written. Not the mean, since a mean lets three
+winning seeds carry a losing one that a pass would then act on; this is the rule the fullness curve already used. A repeat of a seed replaces that seed and adds no vote. A row that names no seed cannot
+be told from a repeat or from a new seed, so it is read as a reading of its own. The score a line quotes is the mean over what it read, with the count beside it, never one seed's.
 THE SIZE FLOOR: across every graph with evidence, the fewest requirements at which the owner GNN has ever won. A model below it runs
 the plain rules without measuring the GNN in a pass (the benchmark still does).
 
@@ -71,7 +75,7 @@ class GraphEvidence(object):
     the graph the GNN reads, the score speaks for a graph that no longer exists, so no learned part runs on it until `gnn_tasks.py
     eval` measures again (the plain rule meanwhile; the epoch benchmark re-measures anyway). ANY change counts: no tick has measured
     how much change a score survives, so a tolerance here would be a guess. Breadcrumb: the row's `shape` is gnn_tasks.graph_shape, and
-    E1-1 (10-30) gave these sizes their reader: they sat beside every score with nothing comparing them."""
+    E1-1 (10-30) gave these sizes their reader: they sat beside every score with nothing comparing them. A score by an older network is in the same case: the network it measured no longer exists."""
 
     SIZE = ("nodes", "edges", "methods", "owner_links", "requirements")
 
@@ -86,6 +90,8 @@ class GraphEvidence(object):
         if not name or not os.path.exists(os.path.join(self.kg, name)):
             return "the graph it measured, %s, is not here" % name
         import gnn_tasks       # torch: only when there is a row to compare, and a machine with a row has measured with it
+        if self.row.get("network") != gnn_tasks.gg.NETWORK:
+            return "measured by network %s, this is network %s" % (self.row.get("network", "1"), gnn_tasks.gg.NETWORK)
         now = gnn_tasks.graph_shape(os.path.join(self.kg, name))
         was = self.row.get("shape") or {}
         return ", ".join("%s %s, now %s" % (k, was.get(k), now.get(k)) for k in self.SIZE if was.get(k) != now.get(k)) or None
@@ -95,6 +101,44 @@ def rows(path):
     if not os.path.exists(path):
         return []
     return [json.loads(l) for l in io.open(path, encoding="utf-8") if l.strip()]
+
+
+def readings(all_rows, same, seed_of):
+    """the rows about the same thing as the last one (`same`: a key of the data it measured), the latest per seed. A row naming no seed is a reading of its own"""
+    if not all_rows:
+        return []
+    mine = same(all_rows[-1])
+    by = collections.OrderedDict()
+    for i, r in enumerate(all_rows):
+        if same(r) == mine:
+            s = seed_of(r)
+            by[("row", i) if s is None else ("seed", s)] = r
+    return list(by.values())
+
+
+def task_key(r):
+    return (r.get("graph"), r.get("network"), tuple((r.get("shape") or {}).get(k) for k in GraphEvidence.SIZE))
+
+
+def task_seed(r):
+    return tuple(r["seeds"]) if r.get("seeds") else None
+
+
+def merged(reads, name):
+    """one job over every reading: it wins only if it wins at each; its scores are means; `won` and `read` count the seeds. None when no reading has it"""
+    js = [r["jobs"][name] for r in reads if name in r.get("jobs", {})]
+    if not js:
+        return None
+    said = [j for j in js if j.get("wins") is not None]
+    if not said:
+        return js[-1]
+    mean = lambda f: sum(j.get(f, 0.0) for j in said) / float(len(said))
+    return {"wins": all(j["wins"] for j in said), "learned": mean("learned"), "best_plain": said[-1]["best_plain"], "plain": mean("plain"), "adds_over_today": mean("adds_over_today"),
+            "won": sum(1 for j in said if j["wins"]), "read": len(said)}
+
+
+def at_seeds(j):
+    return " at %d of %d seeds" % (j["won"], j["read"]) if j.get("read", 1) > 1 else ""
 
 
 def all_task_rows(roots):
@@ -151,12 +195,13 @@ def decide(kg, roots=(HERE,), ab=AB):
     floor = size_floor(all_task_rows(roots), all_curve_rows(roots))
     reqs = last["shape"]["requirements"] if last else model_requirements(kg)
     moved = GraphEvidence(kg, last).moved()
+    reads = readings(own, task_key, task_seed)
 
     def stale(what):
-        return {"on": False, "why": "%s: measured on a graph that has changed since (%s): gnn_tasks.py eval measures it again; until then it stays off" % (what, moved)}
+        return {"on": False, "why": "%s: measured on a graph or by a network that has changed since (%s): gnn_tasks.py eval measures it again; until then it stays off" % (what, moved)}
 
     def job(name, part, what):
-        j = (last or {}).get("jobs", {}).get(name)
+        j = merged(reads, name)
         if j is None:
             plan[part] = {"on": False, "why": "no evidence for %s on this model yet: gnn_tasks.py eval measures it; until then it stays off" % what}
         elif moved:
@@ -164,8 +209,8 @@ def decide(kg, roots=(HERE,), ab=AB):
         elif j.get("wins") is None:
             plan[part] = {"on": False, "why": "not measurable here: %s" % j.get("why")}
         else:
-            plan[part] = {"on": bool(j["wins"]), "why": "%s: learned %.2f against %s %.2f (%s)" % (
-                what, j["learned"], j["best_plain"], j["plain"], "wins by more than %.2f" % MARGIN if j["wins"] else "does not win: it stays off")}
+            plan[part] = {"on": bool(j["wins"]), "why": "%s: learned %.2f against %s %.2f (%s%s)" % (
+                what, j["learned"], j["best_plain"], j["plain"], "wins by more than %.2f" % MARGIN if j["wins"] else "does not win: it stays off", at_seeds(j))}
 
     # the model's OWN evidence decides first; the size floor speaks only for a model not measured yet
     curve = curve_verdict(kg, roots)
@@ -177,7 +222,7 @@ def decide(kg, roots=(HERE,), ab=AB):
         job("owner as today", "gnn owner", "the owner GNN")
     # the owner GNN runs in its BEST winning form: if hearing a new relation is what makes it win, it runs hearing that relation
     # (10-29: on the self model the GNN as it is lost, 0.70 to 0.72, and with `calls` won, 0.74 - the plan had switched it off)
-    variants = [(n, j) for n, j in ((n, (last or {}).get("jobs", {}).get(n)) for n in OWNER_VARIANTS) if j and j.get("wins")]
+    variants = [(n, j) for n, j in ((n, merged(reads, n)) for n in OWNER_VARIANTS) if j and j.get("wins")]
     needs = ()
     if variants and not moved and not plan.get("gnn owner", {}).get("on"):
         n, j = max(variants, key=lambda v: v[1]["learned"])
@@ -185,7 +230,7 @@ def decide(kg, roots=(HERE,), ab=AB):
         plan["gnn owner"] = {"on": True, "why": "the owner GNN %s: learned %.2f against %s %.2f (wins only hearing the added relation%s)" % (
             n.replace("owner + ", "hearing `").rstrip() + "`", j["learned"], j["best_plain"], j["plain"], "s" if n == "owner + both" else "")}
     for rel, key in (("caught by", "owner + caught by"), ("calls", "owner + calls")):
-        j = (last or {}).get("jobs", {}).get(key)
+        j = merged(reads, key)
         if not j or j.get("wins") is None:
             plan["relation " + rel] = {"on": False, "why": "no evidence the GNN does better hearing `%s`" % rel}
         elif moved:
@@ -199,15 +244,19 @@ def decide(kg, roots=(HERE,), ab=AB):
     job("tests", "gnn tests", "which tests catch a branch's breaks")
     job("steps", "gnn steps", "which steps carry a requirement")
     job("equivalent", "equivalent ranking", "which survivors are likely equivalent")
-    sr = rows(os.path.join(kg, "survivor_rank.jsonl"))
+    sr = readings(rows(os.path.join(kg, "survivor_rank.jsonl")), lambda r: (r.get("breaks"), r.get("survived")), lambda r: r.get("seed"))
     if sr and sr[-1].get("survived", 0) < MIN_SURVIVORS:
         plan["break order"] = {"on": False, "why": "too few examples: %d survivors among %d breaks (the learned order needs %d or more): the plain order" % (
             sr[-1].get("survived", 0), sr[-1].get("breaks", 0), MIN_SURVIVORS)}
     elif sr:
-        r = sr[-1]["recall20"]
-        on = r["learned"] > r["operator prior"] + MARGIN and r["learned"] > r["random"] + MARGIN
-        plan["break order"] = {"on": on, "why": "the learned order finds %.0f%% of survivors in the first fifth against the operator prior's %.0f%% (%s)" % (
-            100 * r["learned"], 100 * r["operator prior"], "ahead by more than %.2f" % MARGIN if on else "not ahead by more than %.2f" % MARGIN)}
+        rs = [x["recall20"] for x in sr]
+        won = sum(1 for r in rs if r["learned"] > r["operator prior"] + MARGIN and r["learned"] > r["random"] + MARGIN)
+        on = won == len(rs)
+        mean = lambda f: sum(r[f] for r in rs) / float(len(rs))
+        ceiling = rs[-1].get("ceiling")           # the most any order can find in the first fifth: scores on two graphs compare only beside it
+        plan["break order"] = {"on": on, "why": "the learned order finds %.0f%% of survivors in the first fifth against the operator prior's %.0f%%%s (%s%s)" % (
+            100 * mean("learned"), 100 * mean("operator prior"), "" if ceiling is None else ", and no order could find more than %.0f%%" % (100 * ceiling),
+            "ahead by more than %.2f" % MARGIN if on else "not ahead by more than %.2f" % MARGIN, " at %d of %d seeds" % (won, len(rs)) if len(rs) > 1 else "")}
     else:
         plan["break order"] = {"on": False, "why": "no evidence: the breaks run in their plain order"}
     for line in LINES:
@@ -261,6 +310,7 @@ def selftest():
 
     def real_graph(kg, reqs):
         """a real sqlite graph of `reqs` requirements, one claim; returns the row's head as gnn_tasks writes it"""
+        import graph_gnn as gg
         import gnn_tasks
         import sqlite3
         db = os.path.join(kg, "g.sqlite")
@@ -275,7 +325,7 @@ def selftest():
         con.execute("INSERT INTO edge VALUES ('cell:S-BRANCH:T.M#b0', 122, 'req:R-0', 32)")
         con.commit()
         con.close()
-        return {"graph": "g.sqlite", "shape": gnn_tasks.graph_shape(db)}
+        return {"graph": "g.sqlite", "shape": gnn_tasks.graph_shape(db), "network": gg.NETWORK}
 
     def change_graph(kg, sql):
         import sqlite3
@@ -346,6 +396,7 @@ def selftest():
     fresh = fresh and not pb2["gnn owner"]["on"] and "is not here" in pb2["gnn owner"]["why"]
     print("selftest: EVIDENCE a score about a graph that has changed or gone switches nothing on, and says what moved %s" % ("PASS" if fresh else "FAIL"))
     good = good and fresh
+    good = good and every_seed_selftest(t, real_graph, win, lose)
     good = good and "bug fix: on better 0, off better 1" in pb["when to use the loop"]["why"]
     print(show(pb))
     print("selftest: PLAN a part runs only where it wins by more than %.2f; a relation that adds no more than that is left out; below the "
@@ -358,6 +409,52 @@ def selftest():
     shutil.rmtree(t, ignore_errors=True)
     print("selftest: %s" % ("PASS" if good else "FAIL"))
     return 0 if good else 1
+
+
+def every_seed_selftest(t, real_graph, win, lose):
+    """a plant for each flip of the rule: order does not matter, one loss turns it off, a repeat replaces, an older graph and an older network do not count, and a row naming no seed still votes"""
+    ok = True
+    heads = {}
+    import gnn_tasks
+    now = gnn_tasks.gg.NETWORK
+
+    def plan(name, jobs, seeds, network=now):
+        kg = os.path.join(t, name, "kg")
+        if name not in heads:
+            os.makedirs(kg)
+            heads[name] = real_graph(kg, 20)
+        with io.open(os.path.join(kg, "gnn_tasks.jsonl"), "a", encoding="utf-8") as f:
+            for s, j in zip(seeds, jobs):
+                f.write(json.dumps(dict(heads[name], seeds=s, jobs={"owner as today": j}, network=network)) + "\n")
+        return decide(kg, roots=(os.path.join(t, name),), ab=os.path.join(t, "ab"))["gnn owner"]
+
+    def say(what, good):
+        nonlocal ok
+        ok = ok and good
+        print("selftest: EVERY SEED %s %s" % (what, "PASS" if good else "FAIL"))
+    say("two losing seeds then a winning one stay off, in any order", not plan("o1", [lose, lose, win], [[0], [1], [2]])["on"] and not plan("o2", [win, lose, lose], [[0], [1], [2]])["on"])
+    said = plan("o3", [win, win, win], [[0], [1], [2]])
+    say("wins at every seed is on, and quotes the count and the mean", said["on"] and "at 3 of 3 seeds" in said["why"] and "0.77" in said["why"])
+    say("one winning row then a new losing seed flips it off", plan("o4", [win], [[0]])["on"] and not plan("o4", [lose], [[1]])["on"])
+    say("a repeat of a seed replaces it and adds no vote: a loss then the same seed's win is on", plan("o5", [lose, win], [[0], [0]])["on"])
+    say("rows naming no seed each vote", not plan("o6", [lose, win], [None, None])["on"])
+    # an older network: the last row is by this network, so the older row does not count; a last row by an older network switches nothing
+    say("a loss by an older network does not count against this one", (plan("o7", [lose], [[0]], network=now - 1), plan("o7", [win], [[1]], network=now))[1]["on"])
+    old = plan("o8", [win], [[0]], network=now - 1)
+    say("a win by an older network switches nothing on", not old["on"] and "network" in old["why"])
+
+    def order(name, rs):
+        kg = os.path.join(t, name, "kg")
+        os.makedirs(kg)
+        io.open(os.path.join(kg, "survivor_rank.jsonl"), "w", encoding="utf-8").write("\n".join(json.dumps(r) for r in rs) + "\n")
+        return decide(kg, roots=(os.path.join(t, name),), ab=os.path.join(t, "ab"))["break order"]
+
+    def row(learned, seed, breaks=1000):
+        return {"breaks": breaks, "survived": 55, "seed": seed, "recall20": {"learned": learned, "operator prior": 0.3, "random": 0.2, "ceiling": 0.8}}
+    say("break order: the margin is 0.02, 0.015 ahead is off and 0.025 ahead is on", order("b4", [row(0.315, 0)])["wins"] is False and order("b5", [row(0.325, 0)])["wins"] is True)
+    say("break order: one losing seed of three is off, and says 2 of 3", "at 2 of 3 seeds" in order("b1", [row(0.6, 0), row(0.1, 1), row(0.6, 2)])["why"] and order("b2", [row(0.6, 0), row(0.1, 1), row(0.6, 2)])["wins"] is False)
+    say("break order: a loss on older verdicts does not count, and the ceiling is quoted", (lambda p: p["wins"] is True and "80%" in p["why"])(order("b3", [row(0.1, 0, breaks=900), row(0.6, 0), row(0.6, 1)])))
+    return ok
 
 
 def main(argv):

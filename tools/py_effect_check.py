@@ -63,6 +63,8 @@ class PyCode(object):
     """The Python files under the model's code roots: every function and method as a place (`module.function`,
     `module.Class.method`), each with its statements in source order - the same surface CsCode gives the loop."""
 
+    CONSTANTS = "CONSTANTS"     # the place name of a module's or a class's constants
+
     def __init__(self, roots, scope=None):
         self.files, self.trees, self.index = {}, {}, {}
         # meta.loop.code.scope: place prefixes (`usecase_kg.LoopGate.`) - the functions whose every statement is a cell and a break;
@@ -79,10 +81,12 @@ class PyCode(object):
                 tree = ast.parse(src)
                 self.trees[os.path.normpath(f)] = tree
                 mod = os.path.splitext(os.path.basename(f))[0]
+                self._constants(mod, tree.body, os.path.normpath(f))
                 for node in tree.body:
                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                         self.index["%s.%s" % (mod, node.name)] = (os.path.normpath(f), node)
                     elif isinstance(node, ast.ClassDef):
+                        self._constants("%s.%s" % (mod, node.name), node.body, os.path.normpath(f))
                         for sub in node.body:
                             if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
                                 self.index["%s.%s.%s" % (mod, node.name, sub.name)] = (os.path.normpath(f), sub)
@@ -91,6 +95,16 @@ class PyCode(object):
         self.words = set()
         for src in self.files.values():
             self.words.update(re.findall(r"[A-Za-z_]\w*", src))
+
+    def _constants(self, owner, body, path):
+        """ALL-CAPS names assigned at the top of a module or a class, as one more place (`module.CONSTANTS`, `module.Class.CONSTANTS`). A threshold, a margin or a list of what to leave out decides as much as
+        any statement in a function, and they were never broken: MEASURED 10-30 on a learned part, a leak guard's list, a confidence bar and the margins could be changed by hand with every selftest still passing."""
+        held = [n for n in body if isinstance(n, (ast.Assign, ast.AnnAssign)) and getattr(n, "value", None) is not None and all(
+            isinstance(t, ast.Name) and t.id.isupper() or isinstance(t, ast.Tuple) and all(isinstance(e, ast.Name) and e.id.isupper() for e in t.elts) for t in (n.targets if isinstance(n, ast.Assign) else [n.target]))]
+        if held:
+            block = ast.Module(body=held, type_ignores=[])
+            block.lineno, block.col_offset = held[0].lineno, held[0].col_offset
+            self.index["%s.%s" % (owner, self.CONSTANTS)] = (path, block)
 
     def _stmts(self, fn):
         out = []
@@ -195,6 +209,34 @@ def operators(stmt):
         out.append(("the call removed", lambda s: ast.Pass()))
     if isinstance(stmt, ast.If) and stmt.body:
         out.append(("the branch's body removed", lambda s: setattr(s, "body", [ast.Pass()]) or s))
+    return out[:PER_STATEMENT]
+
+
+def constant_operators(stmt):
+    """[(label, transform)] - every break of one constant: a number each way (a float doubled and halved, an int one more and one less), a text emptied, a truth flipped, each element of a tuple,
+    list or set taken out, and the whole value made None. Labels are stable from run to run"""
+    out = []
+
+    def at(i, fn):
+        def t(s):
+            fn(list(ast.walk(s.value))[i])
+            return s
+        return t
+    for i, n in enumerate(ast.walk(stmt.value)):
+        if isinstance(n, ast.Constant) and isinstance(n.value, bool):
+            out.append(("constant %s made %s (%d)" % (n.value, not n.value, i), at(i, lambda c: setattr(c, "value", not c.value))))
+        elif isinstance(n, ast.Constant) and isinstance(n.value, float):
+            out.append(("constant %r doubled (%d)" % (n.value, i), at(i, lambda c: setattr(c, "value", c.value * 2 or 1.0))))
+            out.append(("constant %r halved (%d)" % (n.value, i), at(i, lambda c: setattr(c, "value", c.value / 2))))
+        elif isinstance(n, ast.Constant) and isinstance(n.value, int):
+            out.append(("constant %d made %d (%d)" % (n.value, n.value + 1, i), at(i, lambda c: setattr(c, "value", c.value + 1))))
+            out.append(("constant %d made %d (%d)" % (n.value, n.value - 1, i), at(i, lambda c: setattr(c, "value", c.value - 1))))
+        elif isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value:
+            out.append(("constant text emptied (%d)" % i, at(i, lambda c: setattr(c, "value", ""))))
+        elif isinstance(n, (ast.Tuple, ast.List, ast.Set)):
+            for k in range(len(n.elts)):
+                out.append(("element %d taken out of a constant (%d)" % (k, i), at(i, lambda c, k=k: c.elts.__delitem__(k))))
+    out.append(("the value made None", lambda s: setattr(s, "value", ast.Constant(None)) or s))
     return out[:PER_STATEMENT]
 
 
@@ -349,7 +391,7 @@ class PyEffectCheck(object):
 
         def add(place, k, st, of):
             node = _find(self.C.trees[st.file], st.node)
-            for what, op in operators(node):
+            for what, op in (constant_operators(node) if place.endswith("." + PyCode.CONSTANTS) else operators(node)):
                 key = "%s@%s: %s" % (place, sid(place, k), what)
                 muts.setdefault(key, PyMutant(key, place, k, st, what, op, node)).of.add(of)
         for aid, (a, sts) in sorted(hits.items()):
@@ -360,8 +402,8 @@ class PyEffectCheck(object):
             add(place, int(key.rsplit("#b", 1)[1]), st, key)
         for place in self.C.places(files):
             sts = self.C.method(place)
-            if sts:
-                f, fn = self.C.index[place]
+            f, fn = self.C.index[place]
+            if sts and not isinstance(fn, ast.Module):      # constants have no function to return from
                 key = "%s@%s: the function returns at once" % (place, sid(place, 0))
                 st0 = sts[0]
 
@@ -584,6 +626,64 @@ sys.exit(0 if ok else 1)
 '''
 
 
+SELF_CONST_PY = '''
+LIMIT = 3
+SURE = 0.7
+LEFT_OUT = ("mutant", "test")
+UNUSED = 9
+lower_is_not_a_constant = 5
+
+
+class Rule(object):
+    MARGIN = 2
+
+    def over(self, x):
+        return x > LIMIT + self.MARGIN
+
+
+def sure(x):
+    return x >= SURE and "test" in LEFT_OUT
+'''
+SELF_CONST_TEST = '''import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import rules
+ok = rules.Rule().over(6) and not rules.Rule().over(5) and rules.sure(0.7) and not rules.sure(0.69)
+print("selftest: rules %s" % ("PASS" if ok else "FAIL"))
+sys.exit(0 if ok else 1)
+'''
+
+
+def constants_selftest():
+    """a module's and a class's constants are places with breaks; a test that reads one kills its breaks, and one nothing reads leaves survivors; a lower-case name is no constant; nothing tries to return from one"""
+    t = tempfile.mkdtemp(prefix="py_effect_const_")
+    ok = True
+    try:
+        p = os.path.join(t, "rules.py")
+        io.open(p, "w", encoding="utf-8").write(SELF_CONST_PY)
+        io.open(os.path.join(t, "rules_test.py"), "w", encoding="utf-8").write(SELF_CONST_TEST)
+        C = PyCode([p])
+        places = set(C.places([os.path.normpath(p)]))
+        good = {"rules.CONSTANTS", "rules.Rule.CONSTANTS"} <= places and [s.text.split(" =")[0] for s in C.method("rules.CONSTANTS")] == ["LIMIT", "SURE", "LEFT_OUT", "UNUSED"]
+        scoped = PyCode([p], scope=["rules.Rule."])
+        good = good and set(scoped.places([os.path.normpath(p)])) == {"rules.Rule.CONSTANTS", "rules.Rule.over"}
+        ok &= good
+        print("selftest: CONSTANTS a module's and a class's ALL-CAPS assignments are places, a lower-case name is not, and a scope reaches them by prefix %s" % ("PASS" if good else "FAIL"))
+        chk = PyEffectCheck(C, PyRunner([{"runner": "py_selftest", "test": os.path.join(t, "rules_test.py"), "covers": [p]}]), workers=2)
+        muts = chk.collect({}, [os.path.normpath(p)])
+        chk.behave(muts)
+        of = lambda place, word: {m.what: m.verdict.get("killed") for m in muts.values() if m.place == place and word in m.st.text}
+        limit, sure_, left, unused, margin = of("rules.CONSTANTS", "LIMIT"), of("rules.CONSTANTS", "SURE"), of("rules.CONSTANTS", "LEFT_OUT"), of("rules.CONSTANTS", "UNUSED"), of("rules.Rule.CONSTANTS", "MARGIN")
+        good = limit and all(v is True for v in limit.values()) and sure_ and all(v is True for v in sure_.values()) and margin and all(v is True for v in margin.values()) \
+            and unused and all(v is False for v in unused.values()) and left.get("element 1 taken out of a constant (0)") is True and left.get("element 0 taken out of a constant (0)") is False \
+            and "the function returns at once" not in " ".join(m.what for m in muts.values() if m.place.endswith(".CONSTANTS"))
+        ok &= good
+        print("selftest: CONSTANTS a test that reads a constant catches its breaks both ways, one nothing reads survives, each element of a list is its own break, and nothing returns from a constant: %s %s" % (
+            sorted(left.items())[:3], "PASS" if good else "FAIL"))
+    finally:
+        shutil.rmtree(t, ignore_errors=True)
+    return ok
+
+
 def selftest():
     """the adapter on a planted module: its shape verdicts, its breaks, a kill, a survivor and an equivalent"""
     ok = True
@@ -657,6 +757,7 @@ def selftest():
     fb = next(c for c in a2 if hasattr(c, "co_code"))
     good = good and code_print(fa) != code_print(fb) and code_print(fa) == code_print(fa)
     ok &= good
+    ok &= constants_selftest()
     print("selftest: RUNNER a line's LAST verdict word decides it (a pass describing PASS/FAIL passes); a break inside a lambda changes "
           "the fingerprint, so it is never 'equivalent' by bytecode %s" % ("PASS" if good else "FAIL"))
     print("selftest: %s" % ("PASS" if ok else "FAIL"))

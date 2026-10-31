@@ -1,0 +1,6 @@
+Key,Summary,Description,Priority,Status,Assignee
+TL-1,Borrow a tool,"The volunteer scans the member card and then the tool.
+A member cannot borrow more than three tools at a time.",High,Open,Sam
+TL-2,Return a tool,"The volunteer scans the tool and checks it for damage. A damaged tool must not go back on the shelf.",High,Open,Ana
+TL-3,Late fees,A late tool costs one credit per day. The member sees the fee before paying.,Medium,Open,Sam
+TL-4,Lost tools,A tool not returned after 30 days is marked lost.,Low,Open,Ana

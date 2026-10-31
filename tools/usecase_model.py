@@ -799,10 +799,11 @@ def selftest():
     meta, data = _clean_data(prose)
     clean = UseCaseModel.from_data(meta, data).check()
     ok = True
-    print("selftest: clean model -> %d finding(s)%s" % (len(clean), "" if not clean else ": " + "; ".join(map(str, clean))))
+    # every check line ends in its verdict, the form every tool's selftest uses and prove_all.py counts checks by
+    print("selftest: clean model -> %d finding(s)%s %s" % (len(clean), "" if not clean else ": " + "; ".join(map(str, clean)), "PASS" if not clean else "FAIL"))
     ok &= not clean
     sentence_keys = [k for k, _ in sentences(prose)]
-    print("selftest: sentence split of the clean source -> %s" % sentence_keys)
+    print("selftest: sentence split of the clean source -> %s %s" % (sentence_keys, "PASS" if sentence_keys == ["1.1", "1.2"] else "FAIL"))
     ok &= sentence_keys == ["1.1", "1.2"]
     for rule, what, plant in PLANTS:
         m, d = copy.deepcopy(meta), copy.deepcopy(data)
@@ -810,12 +811,12 @@ def selftest():
         got = {x.rule for x in UseCaseModel.from_data(m, d).check()}
         hit = rule in got
         ok &= hit
-        print("selftest: %-4s %-40s -> %s %s" % (rule, what, "CAUGHT" if hit else "MISSED", sorted(got)))
+        print("selftest: %-4s %-40s -> %s %s %s" % (rule, what, "CAUGHT" if hit else "MISSED", sorted(got), "PASS" if hit else "FAIL"))
     # the prose split must also refuse to skip a sentence: a third sentence in the source is a missing cell
     io.open(prose, "a", encoding="utf-8").write("A third sentence nobody mapped.\n")
     got = {x.rule for x in UseCaseModel.from_data(meta, data).check()}
-    print("selftest: U7   a source sentence added, no cell            -> %s %s" % (
-        "CAUGHT" if "U7" in got else "MISSED", sorted(got)))
+    print("selftest: U7   a source sentence added, no cell            -> %s %s %s" % (
+        "CAUGHT" if "U7" in got else "MISSED", sorted(got), "PASS" if "U7" in got else "FAIL"))
     ok &= "U7" in got
     print("selftest: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1

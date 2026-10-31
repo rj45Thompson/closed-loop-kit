@@ -1,0 +1,46 @@
+# A filled draft of transcript.txt. Copy it to <model folder>/draft.yml and run: closed_loop.py grow transcript.txt --out <model folder>
+subject: Tool Library desk
+actors:
+- {name: Volunteer, kind: person, profile: the person at the desk}
+- {name: Member, kind: person, profile: a member of the library}
+requirements:
+- {id: R1, cite: ["2.1"], quote: "Every loan has to be written down", says: Every loan is written down with who, what and when it is due., check: make a loan; the record names the member, the tool and the due date}
+- {id: R2, cite: ["3.1"], quote: "can't have more than three tools out", says: A member cannot have more than three tools out., check: lend a fourth tool; it is refused}
+- {id: R3, cite: ["4.1"], quote: "if something is overdue they can't take anything else", says: A member with an overdue tool cannot take another tool., check: lend to a member with an overdue tool; it is refused}
+- {id: R4, cite: ["5.1"], quote: "a credit a day", says: A late return costs a credit a day., check: return a tool two days late; the member pays two credits}
+- {id: R5, cite: ["5.2"], quote: "Nobody pays cash", says: Fees are paid in credits and never in cash., check: try to pay a fee in cash; it is not accepted}
+- {id: R6, cite: ["6.2"], quote: "tools that come back broken go in the repair corner, not on the shelf", says: A tool that comes back broken goes to the repair corner and not on the shelf., check: return a broken tool; it is in the repair corner}
+- id: R7
+  inferred: step 3 of 'Take a tool back' sends a broken tool to the repair corner, and nobody says who decides a tool is broken
+  needs: who decides that a tool is broken
+  says: The volunteer decides whether a returned tool is broken.
+  check: return a tool the volunteer calls broken; it goes to the repair corner
+goals:
+- name: Lend a tool
+  actor: Volunteer
+  steps:
+  - {do: The volunteer asks who is borrowing, reqs: [R1]}
+  - {do: The volunteer checks the member's tools out and anything overdue, reqs: [R2, R3]}
+  - {do: The loan is written down with its due date, reqs: [R1]}
+  ext:
+  - {at: 2, when: the member has three tools out, do: the loan is refused, out: end minimal, reqs: [R2]}
+  - {at: 2, when: the member has something overdue, do: the loan is refused, out: end minimal, reqs: [R3]}
+- name: Take a tool back
+  actor: Volunteer
+  steps:
+  - {do: The member hands the tool back, reqs: [R7]}
+  - {do: The volunteer looks at the tool, reqs: [R7]}
+  - {do: A broken tool goes to the repair corner, reqs: [R6]}
+  ext:
+  - {at: 2, when: the tool is broken, do: it goes to the repair corner, out: end minimal, reqs: [R6]}
+- name: Pay a late fee
+  actor: Member
+  steps:
+  - {do: The days late are counted, reqs: [R4]}
+  - {do: The fee is worked out at a credit a day, reqs: [R4]}
+  - {do: The fee is paid in credits, reqs: [R5]}
+  ext:
+  - {at: 3, when: the member offers cash, do: the cash is not taken, out: rejoin 3, reqs: [R5]}
+exclude:
+- {cites: ["1.1"], why: "context: names the paper log as the pain and states no rule"}
+- {cites: ["3.2", "4.2", "6.1"], why: "talk around a rule: emphasis, an aside, agreement"}

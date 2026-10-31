@@ -41,7 +41,7 @@ A pass where NET grew and OPEN grew too is progress (the net found more), not re
 | `tests`, `tests_idle`, `test_kills_top` | CLOSURE | how many tests, how many catch nothing, the strongest five | verdicts `tests` + kills by test |
 | `requirements`, `musts`, `mays` | OPEN | the modal reading: closed when no may is left | model kinds (inferred = may) |
 | `use_cases`, `claims` | NET | how much of the product the model covers | the model |
-| `graph_nodes`, `graph_edges`, `graph_by_kind` | NET | the record's size, by what it holds | the sqlite store |
+| `graph_nodes`, `graph_edges`, `graph_by_kind` | NET | the record's size, by what it holds | the sqlite store; the two counts leave out document, stat and goal nodes and their links, `graph_by_kind` shows them |
 | `holes` (per criterion), `holes_ours` | OPEN | what still lets a mistake through, per criterion | the report's LOOP table |
 | `gnn_mrr` (gnn and each baseline) | CLOSURE | whether the proposer links new code better than the baselines | the report's section 6 |
 | `chain` (steps, ungrounded, blind) | CLOSURE / OPEN | the AI's reasoning held to the graph | the report's section 5 |

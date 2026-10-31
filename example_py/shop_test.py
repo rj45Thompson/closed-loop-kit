@@ -56,7 +56,7 @@ check("W-1 can_pay: yes to what it holds, no to one more, no to a negative",
 check("W-1 paying takes the price off", lambda: paid(100, 30).money == 70)
 
 # CHECKS: W-2 - a wallet holds from nothing up to what its eight-digit display shows
-check("W-2 nothing and the most are allowed", lambda: Wallet(0).money == 0 and Wallet(MOST).money == MOST)
+check("W-2 nothing and the most are allowed", lambda: Wallet(0).money == 0 and Wallet(MOST).money == MOST and MOST == 99999999)
 check("W-2 below nothing and above the most are refused", lambda: raises(Wallet, -1) and raises(Wallet, MOST + 1))
 
 # CHECKS: W-3 - a limited line sells its quantity, then is sold out; an unlimited line never runs out

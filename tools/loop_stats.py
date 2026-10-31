@@ -39,8 +39,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.environ.get("CLOSED_LOOP_ROOT") or os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 import usecase_model as ucm  # noqa: E402
+import doc_nodes  # noqa: E402
 
-TOOLS = ["closed_loop.py", "cs_effect_check.py", "usecase_kg.py", "usecase_model.py", "graph_gnn.py", "ab_loop.py", "loop_stats.py"]
+TOOLS = ["closed_loop.py", "cs_effect_check.py", "usecase_kg.py", "usecase_model.py", "graph_gnn.py", "ab_loop.py", "loop_stats.py", "doc_nodes.py"]
 MAPS = 122          # cell -> requirement in usecase_kg's graph (graph_gnn.MAPS; graph_gnn needs torch, and this file must run without it)
 
 
@@ -67,6 +68,8 @@ def op_kind(what):
     w = re.sub(r"^(boundary|equality|logic|arithmetic) .*", r"\1", w)
     w = re.sub(r"^\w+'s argument \d+ made default$", "argument made default", w)
     w = re.sub(r"^the number \d+ made \d+$", "number made one more", w)
+    w = re.sub(r"^constant .*(doubled|halved|made .*|emptied)$", "constant changed", w)
+    w = re.sub(r"^element \d+ taken out of a constant$", "constant element taken out", w)
     w = re.sub(r"^the text .* emptied$", "text emptied", w)
     w = re.sub(r"^(true|false) made (true|false)$", "bool flipped", w)
     return w
@@ -77,8 +80,9 @@ class PassStats(object):
     (nodes and edges by kind), the model (musts, mays, requirements, use cases), the report (holes per criterion, the GNN's
     scores, the chains). A number this cannot read is left out of the row, never filled in."""
 
-    def __init__(self, model_dir, report=None, seconds=None, note=None):
+    def __init__(self, model_dir, report=None, seconds=None, note=None, documents=None):
         self.model_dir, self.report, self.seconds, self.note = model_dir, report, seconds, note
+        self.documents = documents or {}        # what the pages say against their records (claims.py): left out of the row when the model keeps no claim registry
 
     def collect(self):
         kg = os.path.join(self.model_dir, "..", "kg")
@@ -131,8 +135,9 @@ class PassStats(object):
         dbp = os.path.join(kg, "%s.sqlite" % name)
         if os.path.exists(dbp):
             db = sqlite3.connect(dbp)
-            row["graph_nodes"] = db.execute("SELECT COUNT(*) FROM entity").fetchone()[0]
-            row["graph_edges"] = db.execute("SELECT COUNT(*) FROM edge").fetchone()[0]
+            # the model's size, documents apart: a model that declares documents must not read as a graph that grew. graph_by_kind shows them
+            row["graph_nodes"] = db.execute("SELECT COUNT(*) FROM entity WHERE kind NOT IN (%s)" % ",".join("'%s'" % k for k in doc_nodes.KINDS)).fetchone()[0]
+            row["graph_edges"] = db.execute("SELECT COUNT(*) FROM edge WHERE p NOT IN (%s)" % ",".join(map(str, doc_nodes.RELATIONS))).fetchone()[0]
             row["graph_by_kind"] = dict(db.execute("SELECT kind, COUNT(*) FROM entity GROUP BY kind").fetchall())
             db.close()
             row.update(owner_pillars(dbp))
@@ -165,6 +170,7 @@ class PassStats(object):
                                                 capture_output=True, text=True).stdout.strip() or None
         except OSError:
             pass
+        row.update(self.documents)
         return {k: v for k, v in row.items() if v is not None}
 
 
@@ -211,6 +217,8 @@ KINDS = {
     "may_radius_max": ("OPEN", -1), "entry_unread": ("OPEN", -1),
     # how few requirements own the code (owner_pillars, SD-3): no direction of its own, improvement's triggers read a run of it
     "pillar_top3_share": ("TOOL", 0), "pillars_80": ("TOOL", 0),
+    # the public pages against their records (claims.py): numbers the record no longer says, and numbers marked with no record to read
+    "doc_claims_stale": ("OPEN", -1), "doc_numbers_unsourced": ("OPEN", -1),
 }
 
 
@@ -429,6 +437,7 @@ class NextImprovement(object):
         ("assumptions", "remove or re-point the entry conditions nothing reads (buzzsaw.py)", ("entry_unread",)),
         ("questions", "answer the who / what / why ... fields the model leaves open (FacetGrid)", ("facets_open",)),
         ("coverage", "bring more code under the requirements", ("decisions", "no_verdict")),
+        ("documents", "bring the public numbers back to their records: claims.py stale, then claims.py unaccounted", ("doc_claims_stale", "doc_numbers_unsourced")),
     ]
     SCORE = {"worsening": 3, "stalled": 2}
     TUNE_EVERY = 5
@@ -690,7 +699,7 @@ def selftest():
         ok &= good
         print("selftest: REPORT due at pass 20 and not 19; the graph's growth read first pass to last, by kind, the unchanged "
               "kinds left out %s %s" % ("PASS" if good else "FAIL", "" if good else g))
-        fg = FacetGrid([{"actor": "A1", "name": "Buy", "why": "", "trigger": "t", "where": "Shop", "pre": "p", "success": "s",
+        fg = FacetGrid([{"actor": "A1", "name": "Buy", "why": "", "trigger": "t", "where": "Store", "pre": "p", "success": "s",
                          "steps": [{"do": "pay", "reqs": ["R-1"]}, {"do": "", "reqs": []}],
                          "ext": [{"at": 1, "when": "short of money", "do": ["refuse"], "out": "", "reqs": ["R-2"]}]}])
         g, st = fg.grid(), fg.stats()

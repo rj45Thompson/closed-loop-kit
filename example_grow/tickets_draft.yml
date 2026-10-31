@@ -1,0 +1,53 @@
+# A filled draft of tickets.csv. Copy it to <model folder>/draft.yml and run: closed_loop.py grow tickets.csv --out <model folder>
+subject: Tool Library tickets
+actors:
+- {name: Volunteer, kind: person, profile: the person at the desk}
+- {name: Member, kind: person, profile: a member of the library}
+requirements:
+- {id: R1, cite: ["2.1"], quote: "scans the member card and then the tool", says: The volunteer scans the member card and then the tool., check: lend a tool; the card scan comes first and is required}
+- {id: R2, cite: ["3.1"], quote: "cannot borrow more than three tools at a time", says: A member cannot borrow more than three tools at a time., check: lend a fourth tool; it is refused}
+- {id: R3, cite: ["6.1"], quote: "checks it for damage", says: The volunteer scans a returned tool and checks it for damage., check: return a tool; the damage check is part of taking it back}
+- {id: R4, cite: ["6.2"], quote: "must not go back on the shelf", says: A damaged tool must not go back on the shelf., check: mark a tool damaged; it is not on the shelf}
+- {id: R5, cite: ["9.1"], quote: "costs one credit per day", says: A late tool costs one credit per day., check: return a tool three days late; it costs three credits}
+- {id: R6, cite: ["9.2"], quote: "sees the fee before paying", says: The member sees the fee before paying., check: return a late tool; the fee is shown before it is taken}
+- {id: R7, cite: ["12.1"], quote: "not returned after 30 days is marked lost", says: A tool not returned after 30 days is marked lost., check: leave a tool out for 31 days; it is marked lost}
+- id: R8
+  inferred: step 2 of 'Mark a tool lost' marks the tool lost, and no sentence says what a lost tool costs the member
+  needs: what a lost tool costs the member
+  says: A lost tool is charged to the member.
+  check: mark a tool lost; the member is charged
+goals:
+- name: Borrow a tool
+  actor: Volunteer
+  steps:
+  - {do: The volunteer scans the member card, reqs: [R1]}
+  - {do: The volunteer scans the tool, reqs: [R1]}
+  - {do: The loan count is checked, reqs: [R2]}
+  ext:
+  - {at: 3, when: the member already has three tools, do: the loan is refused, out: end minimal, reqs: [R2]}
+- name: Return a tool
+  actor: Volunteer
+  steps:
+  - {do: The volunteer scans the tool, reqs: [R3]}
+  - {do: The tool is checked for damage, reqs: [R3]}
+  - {do: A damaged tool stays off the shelf, reqs: [R4]}
+  ext:
+  - {at: 2, when: the tool is damaged, do: it does not go back on the shelf, out: end minimal, reqs: [R4]}
+- name: Pay a late fee
+  actor: Member
+  steps:
+  - {do: The days late are counted, reqs: [R5]}
+  - {do: The fee is shown to the member, reqs: [R6]}
+  - {do: The member pays the fee, reqs: [R5]}
+  ext:
+  - {at: 2, when: the tool is not late, do: no fee is shown, out: end success, reqs: [R5]}
+- name: Mark a tool lost
+  actor: Volunteer
+  steps:
+  - {do: A tool is found still out after 30 days, reqs: [R7]}
+  - {do: The tool is marked lost, reqs: [R7]}
+  - {do: The member is charged for it, reqs: [R8]}
+  ext:
+  - {at: 1, when: the tool comes back on day 30, do: it is not marked lost, out: end success, reqs: [R7]}
+exclude:
+- {cites: ["1.1", "5.1", "8.1", "11.1"], why: "a ticket title: it names the work and the rule is in the description"}

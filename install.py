@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """install.py - put the closed loop into Claude Code: the skill where Claude finds it, the tools beside it, what they need checked,
-every selftest run, and the whole loop run on the example project as the acceptance test.
+then every selftest and the whole loop on the examples proved, several at once, by the kit's own `prove` (tools/prove.py).
 
     cd closed-loop-kit                     (the zip unpacks into this folder)
     python install.py                      install for this user (~/.claude/skills/closed-loop and ~/.claude/closed-loop)
     python install.py --dest DIR           the tools (and the examples, with the report each run writes) somewhere else
     python install.py --skills DIR         the skill somewhere else (Claude Code reads ~/.claude/skills)
+    python install.py --quick              the front door only (grow and ask): about a minute, instead of every selftest and both examples
+    python closed_loop.py prove            (in the tools folder, after an install) prove it all again, or `prove --quick`; see its result
     python install.py --check              check only: nothing is copied
     python install.py --uninstall          remove what an install put down (it touches nothing else)
 
@@ -15,6 +17,7 @@ optional piece the rest still runs; what it would have done is said, never faked
 """
 import argparse
 import importlib
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -22,18 +25,10 @@ import sys
 
 KIT = os.path.dirname(os.path.abspath(__file__))
 HOME = os.path.expanduser("~")
-TOOLS = ["usecase_model.py", "usecase_kg.py", "closed_loop.py", "cs_effect_check.py", "py_effect_check.py", "graph_gnn.py",
+TOOLS = ["usecase_model.py", "doc_nodes.py", "usecase_kg.py", "closed_loop.py", "prove.py", "grow.py", "ask.py", "source_rules.py", "cs_effect_check.py", "py_effect_check.py", "graph_gnn.py",
          "ab_loop.py", "grade_panel.py", "loop_stats.py", "improvement.py", "improvement/stat_requirements.yaml", "buzzsaw.py",
          "loop_tick.py", "TICK.md", "run_plan.py", "telemetry_audit.py", "survivor_rank.py", "gnn_tasks.py", "gnn_more.py", "gnn_curve.py", "graph_flythrough.py", "gnn_goals.py", "gnn_goals.yaml",
          "il_bodies/il_bodies.csproj", "il_bodies/Program.cs", "STATS.md"]
-SELFTESTS = ["usecase_model.py", "usecase_kg.py", "closed_loop.py", "cs_effect_check.py", "py_effect_check.py", "loop_stats.py",
-             "ab_loop.py", "grade_panel.py", "improvement.py", "buzzsaw.py", "loop_tick.py", "telemetry_audit.py", "graph_flythrough.py", "gnn_goals.py"]
-# the selftests that need an optional piece. Absent, each is named as skipped and never counted as passed (10-30: on Python and PyYAML
-# alone, run_plan.py and survivor_rank.py crashed on the import and a clean install read INSTALLED WITH FAILURES)
-NEEDS = {"torch": ["graph_gnn.py", "gnn_more.py", "gnn_tasks.py", "gnn_curve.py", "run_plan.py"], "sklearn": ["survivor_rank.py"]}
-NEED_NAMES = {"torch": "PyTorch", "sklearn": "scikit-learn"}
-
-
 def say(ok, what, why=""):
     print("  %-4s %s%s" % ({True: "ok", False: "FAIL", None: "--"}[ok], what, ("  (" + why + ")") if why else ""))
     return ok
@@ -49,15 +44,14 @@ def check_needs():
     except ImportError:
         ok &= say(False, "PyYAML", "pip install pyyaml")
     opt = {}
-    try:
-        importlib.import_module("torch")
+    # asked for by name and NOT imported: importing PyTorch to see whether it is there took 50 s on a machine that had it (MEASURED 10-31, a clean home on a loaded machine)
+    if importlib.util.find_spec("torch") is not None:
         opt["torch"] = say(True, "PyTorch (the GNN link proposer)")
-    except ImportError:
+    else:
         opt["torch"] = say(None, "PyTorch not found", "the GNN proposer is skipped; pip install torch to use it")
-    try:
-        importlib.import_module("sklearn")
+    if importlib.util.find_spec("sklearn") is not None:
         opt["sklearn"] = say(True, "scikit-learn (ranking which holes to show first)")
-    except ImportError:
+    else:
         opt["sklearn"] = say(None, "scikit-learn not found", "survivor_rank.py is skipped; pip install scikit-learn to use it")
     opt["dotnet"] = shutil.which("dotnet") is not None
     say(True if opt["dotnet"] else None, ".NET SDK (the C# adapter and the example)" if opt["dotnet"] else ".NET SDK not found",
@@ -71,7 +65,7 @@ def install(dest, skills):
     for f in TOOLS:
         os.makedirs(os.path.dirname(os.path.join(dest, f)), exist_ok=True)
         shutil.copy2(os.path.join(KIT, "tools", f), os.path.join(dest, f))
-    for ex in ("example", "example_py"):
+    for ex in ("example", "example_py", "example_grow"):
         if os.path.exists(os.path.join(dest, ex)):
             shutil.rmtree(os.path.join(dest, ex))
         shutil.copytree(os.path.join(KIT, ex), os.path.join(dest, ex),
@@ -87,51 +81,14 @@ def install(dest, skills):
     print("Installed: the skill at %s, the tools at %s" % (skill_dir, dest))
 
 
-def selftests(dest, opt):
-    print("Every selftest:")
-    ok = True
-    names = list(SELFTESTS)
-    for need, files in NEEDS.items():
-        if opt.get(need):
-            names += files
-        else:
-            for f in files:
-                say(None, "%s skipped: it needs %s" % (f, NEED_NAMES[need]))
-    for f in names:
-        r = subprocess.run([sys.executable, "-X", "utf8", os.path.join(dest, f), "--selftest"], capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", cwd=dest)
-        last = (r.stdout.strip().splitlines() or ["(no output)"])[-1]
-        ok &= say(r.returncode == 0, f, "" if r.returncode == 0 else last[-120:])
-    return ok
-
-
-# the examples the acceptance test runs: (name, model, the optional piece it needs or None). The Python one needs nothing
-# optional, so every machine that installs at all runs the whole loop once (KT-8, 10-29: with no .NET SDK nothing did)
-EXAMPLES = [("Python", "example_py", None), ("C#", "example", "dotnet")]
-
-
-def acceptance(dest, opt):
-    """the whole loop on each example this machine can run: every statement broken, each break run against its tests; each must
-    HOLD (the owner's one question open). True, False, or None when no example could run"""
-    print("The acceptance test - the whole loop on the examples:")
-    env = dict(os.environ, CLOSED_LOOP_ROOT=dest)
-    results = []
-    for name, folder, needs in EXAMPLES:
-        if needs and not opt.get(needs):
-            say(None, "the %s example skipped: no %s" % (name, {"dotnet": ".NET SDK"}.get(needs, needs)))
-            continue
-        r = subprocess.run([sys.executable, "-X", "utf8", os.path.join(dest, "closed_loop.py"), "run", folder + "/model", "--out",
-                            folder + "/CLOSED_LOOP.md", "--note", "the install's acceptance run"], capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", cwd=dest, env=env)
-        held = "closed_loop: HOLDS" in r.stdout
-        made = next((l for l in r.stdout.splitlines() if " made, " in l), "")
-        say(held, "the %s example HOLDS" % name if held else "the %s example did not hold" % name, made.strip()[-140:])
-        if not held:
-            # the HOLES, not the tail: the tail can be a tool's first-run banner (KT-5, 10-29: .NET's welcome text hid the cause)
-            holes = [l for l in r.stdout.splitlines() if "OURS:" in l or l.startswith("      ") or "Traceback" in l or "Error" in l]
-            print("\n".join(holes[:40]) or (r.stdout[-1500:] + r.stderr[-800:]))
-        results.append(held)
-    return None if not results else all(results)
+def prove(dest, quick):
+    """the proof, by the kit's own `prove` (prove.py): every selftest and the examples of the installed tools, several at once at below-normal priority, one result.
+    A selftest that needs a piece this machine lacks is NOT RUN and says which; a tool that hangs, or exits 0 having checked nothing, is named and is not a pass.
+    Returns prove's exit: 0 proved, 3 nothing failed but no example that runs the whole loop could run here, 1 otherwise. MEASURED 10-31 on a clean home folder:
+    the same proofs run one after another took 15 to 17 minutes; the sequential list is gone"""
+    print("The proof, %s:" % ("the front door only" if quick else "every selftest and the whole loop on the examples, together"))
+    cmd = [sys.executable, "-X", "utf8", os.path.join(dest, "prove.py"), "--folder", dest, "--brief"] + (["--quick"] if quick else [])
+    return subprocess.run(cmd, cwd=dest).returncode
 
 
 def uninstall(dest, skills):
@@ -153,6 +110,7 @@ def main(argv):
     ap.add_argument("--skills", default=os.path.join(HOME, ".claude", "skills"))
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--uninstall", action="store_true")
+    ap.add_argument("--quick", action="store_true", help="only the front door (grow and ask): its selftests and its acceptance run, about a minute; the rest of the loop is not proved")
     a = ap.parse_args(argv)
     dest, skills = os.path.abspath(a.dest), os.path.abspath(a.skills)
     if a.uninstall:
@@ -164,19 +122,22 @@ def main(argv):
     if a.check:
         return 0
     install(dest, skills)
-    ok = selftests(dest, opt)
-    held = acceptance(dest, opt)
-    ok &= held is not False
-    # a skipped acceptance test is not a pass (KT-5, 10-29: with no .NET SDK this printed READY although the whole loop had never
-    # run on this machine): the selftests prove each piece, only the acceptance test proves them together
-    if not ok:
+    rc = prove(dest, a.quick)
+    if a.quick:
+        print("\nINSTALLED, FRONT DOOR ONLY: %s. The other selftests and both examples were not run; run `python install.py` when you want the whole loop proved."
+              % ("grow and ask are proved here" if rc == 0 else "THE FRONT DOOR FAILED (above)"))
+        return 0 if rc == 0 else 1
+    # a skipped acceptance test is not a pass (the whole loop never ran on this machine and an earlier version of this printed READY anyway):
+    # the selftests prove each piece, only an example proves them together
+    if rc == 3:
+        print("\nINSTALLED, NOT PROVEN HERE: every selftest that could run passed, but the whole loop never ran on this machine (the examples "
+              "need what is named above). Install it, then run `python install.py` again.")
+        return 0
+    if rc != 0:
         print("\nINSTALLED WITH FAILURES (above): the skill is in place, but do not trust its verdicts until each is fixed.")
-    elif held is None:
-        print("\nINSTALLED, NOT PROVEN HERE: every selftest passed, but the whole loop never ran on this machine (the acceptance test "
-              "needs what is named above). Install it, then run `python install.py` again.")
-    else:
-        print("\nREADY. In Claude Code, ask for the closed loop on a model (the skill is `closed-loop`); start from README.md.")
-    return 0 if ok else 1
+        return 1
+    print("\nREADY. In Claude Code, ask for the closed loop on a model (the skill is `closed-loop`); start from README.md.")
+    return 0
 
 
 if __name__ == "__main__":

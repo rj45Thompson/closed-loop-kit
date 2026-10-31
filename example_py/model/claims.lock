@@ -1,10 +1,11 @@
 # closed_loop.py: each method claim's fingerprint of its method's statements, and each equivalent's of the methods it
 # rests on, when they were pinned, and why. Never edit: --pin-claims "<why>" re-pins after a person read them.
-equiv:shop.Store.buy@8a4000: comparison Gt to GtE (1)	467e77e073eb0943	re-pinned after reading shop.Store.buy: its sold-out return comes before the count-down, which the declared equivalent rests on
-shop.Store.__init__	59db27587e075a7f	re-pinned after reading shop.Store.buy: its sold-out return comes before the count-down, which the declared equivalent rests on
-shop.Store.buy	467e77e073eb0943	re-pinned after reading shop.Store.buy: its sold-out return comes before the count-down, which the declared equivalent rests on
-shop.Store.left	87887b82db04dc9a	re-pinned after reading shop.Store.buy: its sold-out return comes before the count-down, which the declared equivalent rests on
-shop.Store.stock	16de9d8b1605c3b9	re-pinned after reading shop.Store.buy: its sold-out return comes before the count-down, which the declared equivalent rests on
-shop.Wallet.__init__	91e64a4c9aa45567	re-pinned after reading shop.Store.buy: its sold-out return comes before the count-down, which the declared equivalent rests on
-shop.Wallet.can_pay	1baef61d50dd0f2f	re-pinned after reading shop.Store.buy: its sold-out return comes before the count-down, which the declared equivalent rests on
-shop.Wallet.pay	a6b201221afdd762	re-pinned after reading shop.Store.buy: its sold-out return comes before the count-down, which the declared equivalent rests on
+equiv:shop.Store.buy@8a4000: comparison Gt to GtE (1)	467e77e073eb0943	the module's constant is claimed by W-2 now that the adapter breaks constants, read and pinned
+shop.CONSTANTS	2cc9f93ce84ec2b4	the module's constant is claimed by W-2 now that the adapter breaks constants, read and pinned
+shop.Store.__init__	59db27587e075a7f	the module's constant is claimed by W-2 now that the adapter breaks constants, read and pinned
+shop.Store.buy	467e77e073eb0943	the module's constant is claimed by W-2 now that the adapter breaks constants, read and pinned
+shop.Store.left	87887b82db04dc9a	the module's constant is claimed by W-2 now that the adapter breaks constants, read and pinned
+shop.Store.stock	16de9d8b1605c3b9	the module's constant is claimed by W-2 now that the adapter breaks constants, read and pinned
+shop.Wallet.__init__	91e64a4c9aa45567	the module's constant is claimed by W-2 now that the adapter breaks constants, read and pinned
+shop.Wallet.can_pay	1baef61d50dd0f2f	the module's constant is claimed by W-2 now that the adapter breaks constants, read and pinned
+shop.Wallet.pay	a6b201221afdd762	the module's constant is claimed by W-2 now that the adapter breaks constants, read and pinned

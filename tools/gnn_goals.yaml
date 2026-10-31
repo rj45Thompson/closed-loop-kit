@@ -140,6 +140,9 @@ patterns_found:
 attempts:
   - title: Turning a goal into a vector that points at something good
     result: A goal became a list of numbers measured before any training, and a direction was fitted to what paid off, then tested on graphs it had never seen, with its bars and its predictions committed before the results. There is a weak direction for what a network can learn, and it held up on goals sealed in advance, 9 graphs of 10. There is none for what saves work. The two point about 95 degrees apart, so learnable and useful are different questions. The direction could also be gamed by copying a goal's sources, and it ranked a random relation high. It rests on 13 graphs in 5 domains, which can show a direction is not general but cannot show one is. So no goal is picked this way, and a person or a tick still decides.
+  - title: Letting the owner network count
+    held: true
+    result: Reading the code found two things that could hold the owner network back. It averages its neighbours, so it cannot tell 2 from 200, and it never receives the kill count that beats it. With the bars written first, the kill count as an input moved it at every seed and brought it level with the plain rule on one project, 0.858 against 0.845, past the margin at only 2 of 7 fresh seeds, so it is a tie and adds nothing past the count. Layers that can count looked good on 3 seeds and failed on 7 fresh ones, moving it by more than the bar at 3 of 7 and 2 of 7, so the average was not what held it back. They did narrow the spread between seeds on one project, from 0.74 to 0.78 down to 0.77 to 0.78.
 # what a goal may read, tried and judged: these are adjustments to a goal, never goals of their own
 variants:
   - job: owner + calls

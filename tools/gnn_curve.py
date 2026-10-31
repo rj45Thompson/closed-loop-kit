@@ -90,7 +90,7 @@ def req_order(view, rest, by, rnd):
     raise ValueError("no seed order %r (known: methods, %s)" % (by, ", ".join(ORDERS)))
 
 
-def measure(view, fractions=FRACTIONS, seed=0, folds=5, epochs=300, fit=None, by="methods"):
+def measure(view, fractions=FRACTIONS, seed=0, folds=5, epochs=None, fit=None, by="methods"):
     """{f: {ranker: MRR}} for one seed; `fit` stands in for the GNN in the selftest (it records what each fit was given). `by`:
     methods (the first f of the claimed METHODS seen) or a requirement order (the first f of the REQUIREMENTS' claims seen)"""
     truth = collections.defaultdict(set)
@@ -132,7 +132,7 @@ def crossover(by_seed):
     return None
 
 
-def curve(db, fractions=FRACTIONS, seeds=(0, 1), folds=5, epochs=300, say=print, by="methods"):
+def curve(db, fractions=FRACTIONS, seeds=(0, 1), folds=5, epochs=None, say=print, by="methods"):
     view = gg.GraphView(db)
     cells = {c for c, _ in view.links}
     shape = {"nodes": len(view.ids), "edges": len(view.edges), "requirements": len(view.reqs), "linked_cells": len(cells),
@@ -257,7 +257,7 @@ def main(argv):
     ap.add_argument("--fractions", default=",".join(str(f) for f in FRACTIONS))
     ap.add_argument("--seeds", default="0,1")
     ap.add_argument("--folds", type=int, default=5)
-    ap.add_argument("--epochs", type=int, default=300)
+    ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--threads", type=int, default=2, help="torch threads: the machine is shared")
     ap.add_argument("--by", default="methods", help="methods, or a requirement seed order: %s (comma-separated for several)" % ", ".join(ORDERS))
     ap.add_argument("--selftest", action="store_true")

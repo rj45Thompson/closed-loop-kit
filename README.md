@@ -8,6 +8,37 @@ and that model still names holes. Read [the limits](#honest-limits) before you t
 - **The manual:** <https://rj45thompson.github.io/anchor-demo/harness/fly/>
 - **Results on code anyone can check:** <https://rj45thompson.github.io/anchor-demo/harness/public-code/>
 
+## Start here: an epic in, the first question out
+
+You have a rough epic, a PRD, a ticket export or a call transcript, and you want the requirements nobody wrote down. Five minutes, Python and PyYAML, no .NET, no key:
+
+```
+python install.py --quick                                                  # under a minute: the front door only, proved on a shipped example (python install.py proves the whole loop: about a minute on Python alone, minutes more with the .NET SDK)
+cd ~/.claude/closed-loop                                                   # the tools folder (on Windows: cd %USERPROFILE%\.claude\closed-loop); the same files are in tools/ of this clone
+python -X utf8 closed_loop.py grow my_epic.md --out my_model              # numbers every sentence, writes my_model/BRIEF.md and a skeleton draft.yml, exits 3
+#   your agent reads the numbered sentences and fills my_model/draft.yml; then the same command again:
+python -X utf8 closed_loop.py grow my_epic.md --out my_model              # refuses what it cannot ground, or writes the model and prints the FIRST QUESTION
+python -X utf8 closed_loop.py ask my_model --answer "their words" --check "how it would be seen to hold"   # or --confirm (the producer agrees with the reading offered), --absent "reason", --later "reason"
+```
+
+**What a program can do about prose is small and exact, so the work is split.** The tool numbers each sentence (`4.1` is line 4, first sentence; for tickets it also says which ticket and field, for a
+transcript who said it and when), prints a brief, and then checks what comes back. The agent that runs the command is the reader; no model is called. Every requirement in the draft must quote at least
+two words of a sentence it cites, or be marked INFERRED with the reason a step of the chain needs it. A requirement that cites nothing, cites a sentence that is not in the text, quotes words the
+sentence lacks, or is inferred with no real reason, is refused and nothing is written. An empty text, or one with no sentences, stops the run.
+
+**The questions come from holes in the chain, not from a script.** `ask` takes the model the draft became and asks one question at a time, in plain words with no id in them, about: two statements that
+cannot both hold (a number that changed, a rule and its negation), a step that needs something nobody authored, a sentence of your text that no requirement captures, a goal with no alternate path (what
+happens when a step cannot complete?), and the fields of a goal the text never states. They are ranked: what an answer can change comes first. A reply is one of four things: the producer's words
+(they become a requirement with the producer as its source), ABSENT with the reason, CONFIRMED, or LATER. The answer is written into the model and the next question comes from the new state; an answered
+question never returns, a session that stops resumes where it was, and a stop with questions open says how many (`ask my_model --status`; `--list` shows every open question in order). `grow` exits 0
+once it has written the model and 1 when it refused the draft; `ask` exits 1 while a question is open and 0 when none is. The order is: statements that disagree (any answer built on either is suspect),
+then a need nobody authored, a vague word or an uncaptured sentence of your text, a goal with no alternate path, and last the fields of a goal; inside a kind, the answer more of the chain rests on first. The shipped `example_grow/` holds the wallet brief with a draft, and a PRD, a ticket export and a
+transcript with a draft each.
+
+It borrows ideas, none of its code: Spec Kit's clarify step (MIT), BMAD-METHOD's analyst brainstorming (MIT), Superpowers' one-question-at-a-time brainstorming (MIT), OpenSpec's explore step (MIT), Agent OS's shaping
+questions (MIT), Task Master's parse of a requirements document into tasks (MIT with the Commons Clause, so the idea only), SpecTrace's import of requirements from specs (MIT). Kiro and Claude Code's question tool
+are proprietary: idea only. What this adds is that a requirement carries its sentence or its reason and a program checks it.
+
 ## What it is
 
 An AI that writes code from prompts drifts from what was asked, and reports work done that is not. The requirements it acts on are
@@ -24,9 +55,12 @@ failure of the requirements, so it becomes a new requirement, marked inferred, a
 What is in the box:
 
 - **The model:** use cases and requirements as YAML, checked by 19 rules (`usecase_model.py`).
-- **The graph:** requirements, steps, code places, breaks, tests and argument steps as nodes in SQLite, held by 17 criteria, each proved
+- **The graph:** requirements, steps, code places, breaks, tests and argument steps as nodes in SQLite, held by 18 criteria, each proved
   by a planted mistake in its selftest (`usecase_kg.py`).
+- **The front door** (`grow.py`, `ask.py`): from text someone already wrote to a first model and the questions that grow it, with no key and no .NET. Above.
 - **The one command:** `closed_loop.py run` does all of it and writes a report.
+- **The documents as nodes** (`doc_nodes.py`): declare your documents and each section becomes a node, linked from what it names literally or from a line
+  you author with the words it stands on. `doc_nodes.py what-to-update <node>` says which documents a change makes stale.
 - **Code checks** for C# (`cs_effect_check.py`, any .NET project through `dotnet test`) and Python (`py_effect_check.py`). A survivor
   counts as no hole only when compiled code proves it the same program, or a reason says why, resting on code that has not changed.
 - **Argument chains:** a chain is a file an agent writes on purpose, listing its claims and their evidence. Each step is walked through the
@@ -65,23 +99,33 @@ python install.py
 By default the skill goes in `~/.claude/skills/closed-loop` and the tools in `~/.claude/closed-loop`. `--dest DIR` and `--skills DIR`
 move them, `--check` only checks what is needed, and `--uninstall` removes what an install put down.
 
-The installer proves itself: it runs every selftest, then runs the whole loop on the examples, each of which must print HOLDS. On Python
-and PyYAML alone, 14 of the 20 selftests and the Python example run; what needs an optional piece is named as skipped, never counted as passed.
+The installer proves itself with the same command you can run again at any time, from the tools folder: `python -X utf8 closed_loop.py prove` (`prove --quick` is the front door only).
+It runs every selftest and the whole loop on the examples, several at once at below-normal priority so the machine stays usable, and ends in one result: what passed, what failed, what gave no
+answer, and what was not run and why. A selftest that needs a piece the machine lacks (PyTorch, scikit-learn) says so and is never counted as passed; so is an example that needs the .NET SDK. A
+selftest that hangs is killed and named; one that exits 0 having checked nothing is named and is not a pass. On Python and PyYAML alone the Python example and every selftest that needs nothing else
+run. Measured on a clean Windows home folder, on a machine other work was using: 28 to 62 seconds with Python and PyYAML alone, and 5 to 8 minutes the first time with PyTorch and the .NET SDK, most of it the C# example, whose first build downloads about 250 MB of packages.
 
 ## Try it
 
 `example/` is a small wallet and store in C#; `example_py/` is the same store in Python. Each holds a complete model in `model/*.yaml`, and
 each test names what it checks on the line above it (`/// CHECKS: W-1`). The whole brief, from the example's imaginary owner: "The wallet pays
 only what it holds; a limited line sells out and an unlimited one never does; the display holds eight digits." After an install, from the
-tools folder:
+tools folder (`cd ~/.claude/closed-loop`):
 
 ```
-CLOSED_LOOP_ROOT=. python -X utf8 closed_loop.py run example_py/model --out example_py/CLOSED_LOOP.md
+python -X utf8 closed_loop.py prove                       # every selftest and both examples, together, one result
+```
+
+or one example by hand. `CLOSED_LOOP_ROOT` is the folder the model's paths are relative to, so it is set for that one command, in the way your shell sets a variable:
+
+```
+CLOSED_LOOP_ROOT=. python -X utf8 closed_loop.py run example_py/model --out example_py/CLOSED_LOOP.md          # bash, zsh, Git Bash
+$env:CLOSED_LOOP_ROOT="."; python -X utf8 closed_loop.py run example_py/model --out example_py/CLOSED_LOOP.md   # PowerShell
+set "CLOSED_LOOP_ROOT=." && python -X utf8 closed_loop.py run example_py/model --out example_py/CLOSED_LOOP.md  # cmd
 python -X utf8 loop_stats.py show example_py/model
 ```
 
-`CLOSED_LOOP_ROOT` is the folder the model's paths are relative to (on Windows, set it the way your shell does). Exit 1 means a hole of
-yours is open; the owner's questions never fail a run. Read the report: survivors one per decision, the criteria table, the owner's
+Exit 1 means a hole of yours is open; the owner's questions never fail a run. Read the report: survivors one per decision, the criteria table, the owner's
 questions.
 
 ## Use it on your code
@@ -122,20 +166,26 @@ tested finding defects, not how much the tests hold, which is what breaks are fo
 reading the code against each rule while writing the model. The breaks did not find them; they measured what the tests hold and showed
 where no test looks.
 
-**On one C# game feature**, a shop system of 488 lines of code, on 2026-10-29:
+**On one C# game feature of ours**, on 2026-10-29:
 
 - With one break per requirement the loop read "15 caught, 0 got past"; with every statement broken every way it read 89 of 340 getting
   past, on the same code. A loop that breaks code one way flatters.
 - Over five passes, breaks made went 340 -> 806, breaks no test caught 89 -> 29 (most of the rest proven or explained equivalent), and
   statements held by a test 31 -> 169 of 173.
 - Walking the use cases found 10 requirements nobody had written, beside the 17 already written.
-- The graph neural network, on whole methods it never saw, scored MRR 0.76 against 0.67 for the best plain ranker that reads no test results.
-  Once test results exist a plain count beats it, 0.84 against 0.77, so owners on that feature come from the count. When at least 70% sure it was
-  right 92% of the time, on about 40% of new code, over four seeds; below that it abstains.
-  It only beat the no-test-results rule on the largest model tried (27 requirements over 41 methods), and only once about half of its code was claimed.
-  On the 4-requirement examples the plain rule won at every fullness. Until your model is that full, read the plain rule's suggestions.
+- The graph neural network proposes owners for new code and abstains below 70% sure. On the tool's own code a plain rule beats it, MRR 0.65 against 0.72
+  (a mean over five seeds). It beat the no-test-results rule only on the largest model tried, a game feature of ours that is not public, and only once about
+  half of its code was claimed. On the 4-requirement examples the plain rule won at every fullness. Until your model is that full, read the plain rule's suggestions.
 
 ## Honest limits
+
+- **The drafter is the reader, and the tool cannot read.** It checks that a citation exists and that the quoted words are in the sentence. It cannot check that a requirement means what its sentence means,
+  and a thin draft makes thin questions: the queue is only as long as the chain the draft built. The questions that reach what a producer left out come from the needs the drafting agent infers while it
+  walks each step, and from vague words in the text; the holes the tool finds by itself (a goal with no alternate path, the fields of a goal) are mostly questions a producer of a rough epic has little to say about.
+  On two invented games, an agent told to ask clarifying questions, with no kit, reached more of the producer's rules than the queue did (one run each, a sign and not a measure). What the queue adds
+  is the record (every requirement has its sentence or its reason, every answer its source, nothing is asked twice, a session resumes), and that is all it claims.
+- **Two holes cannot be answered ABSENT in the rules.** The 19 rules have no place for "this goal has no alternate path, and here is why" or "there is no separate way to see the result"; those answers are
+  recorded and the question closes, and the rules still list the hole, which the tool says.
 
 - **It is a prototype.** Real code broke it in six ways on the public trials, including silently skipping overloads, operators, generic
   methods and property bodies while the report read as if the whole file was held. Those are fixed, each with a planted case, and the report

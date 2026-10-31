@@ -28,7 +28,8 @@ selftest pass.
     py -X utf8 <tools>/improvement.py check <model>        the triggers that fire on your latest passes
     py -X utf8 <tools>/loop_stats.py trends <model>        what the stats pick
 
-In this order: a red selftest, an unread stat, a fired trigger, what the stats pick. The start of an epoch (every 12 ticks, `start` says
+In this order: a red selftest, an unread stat, a fired trigger, what the stats pick, then what the two lists ask (`start` prints it as THE LISTS ASK: a goal that lost to a plain rule asks for
+the stat that rule rests on as an input, a stat no goal reads asks for a goal). The start of an epoch (every 12 ticks, `start` says
 so) is a brainstorm instead: write ranked ideas down, each with the number that would prove it.
 
 ## 4. Do it
@@ -45,5 +46,9 @@ Measure the stat with one command, change one thing, measure with the same comma
 ## 6. Finish
 
     py -X utf8 <tools>/loop_tick.py finish --item <id> --minutes <n> --found "<one measured line>" --worth yes|no|unknown --targets <stat>
+
+`finish` also rewrites the Goals List and Stats List (`gnn_goals.py --write`), rebuilds the growth page when `growth.py` is installed and a site is named (`growth_site.txt`, or the
+environment variable `CLOSED_LOOP_SITE`), and names the documents that describe the stat in `--targets` (`doc_nodes.py what-to-update`). A step whose tool is not installed says so and is
+skipped; a step that runs and fails is printed and makes `finish` exit 1 after the ledger row is written. Do not repeat by hand what `finish` just did.
 
 Say `worth no` honestly: it is what keeps an idle loop from spending. Commit only the files you changed. Send nothing to anyone.

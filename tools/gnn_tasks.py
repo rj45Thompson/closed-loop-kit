@@ -44,12 +44,15 @@ MARGIN = 0.02            # a learned job "wins" only by more than this over the 
 class TaskView(gm.RichView):
     """the graph re-aimed at another job: `cells` are the job's sources, `reqs` its candidate answers, `links` the true pairs, `place`
     the unit a fold holds out whole. The true pairs of held-out sources are hidden from the message passing, and so is whatever else
-    a new source would not have yet (`blind`: e.g. a new branch has no owner either)"""
+    a new source would not have yet: `blind` from the source itself (a new branch has no owner either), `unit_blind` from the unit it
+    sits in (a new use case has no gulfs naming requirements either)"""
 
-    def aim(self, cells, targets, links, place, target_ps, blind_ps=(), effects=None):
+    target_ps = blind_ps = unit_blind_ps = frozenset()
+
+    def aim(self, cells, targets, links, place, target_ps, blind_ps=(), effects=None, unit_blind_ps=()):
         self.cells, self.reqs, self.links = sorted(cells), sorted(targets), sorted(links)
         self.place = dict(place)
-        self.target_ps, self.blind_ps = set(target_ps), set(blind_ps)
+        self.target_ps, self.blind_ps, self.unit_blind_ps = set(target_ps), set(blind_ps), set(unit_blind_ps)
         self.effects_at = effects or collections.defaultdict(collections.Counter)
         self.kill_votes = {}
         return self
@@ -57,20 +60,13 @@ class TaskView(gm.RichView):
     def group(self, p):
         return "claims" if p in self.target_ps else gm.group_of(p)
 
-    def adjacency(self, hidden=()):
-        hide = set(hidden)
-        out_src = {c for c, _ in hide}
-        n = len(self.ids)
-        edges = self.edges + [e for name in sorted(self.add) for e in self.derived(name)]
-        mats = []
-        for g in gg.RELATION_GROUPS:
-            a = gg.torch.zeros(n, n)
-            for s, o, p in edges:
-                if (p in self.target_ps and (s, o) in hide) or (s in out_src and p in self.blind_ps) or p in self.drop or self.group(p) != g:
-                    continue
-                a[self.index[s], self.index[o]] = a[self.index[o], self.index[s]] = 1.0
-            mats.append(a / a.sum(1, keepdim=True).clamp(min=1.0))
-        return mats
+    def moving(self):
+        return self.target_ps | self.blind_ps | self.unit_blind_ps
+
+    def hide_rule(self, hide):
+        sources = {c for c, _ in hide}
+        units = {self.place.get(c) for c in sources}
+        return lambda s, o, p: (p in self.target_ps and (s, o) in hide) or (s in sources and p in self.blind_ps) or (s in units and p in self.unit_blind_ps)
 
 
 def popular(self, cell, visible):
@@ -94,8 +90,8 @@ def run_eval(view, seeds, epochs, extra=()):
     return {k: sum(r[k]["mrr"] for r in res) / len(res) for k in names}
 
 
-def job_tests(db, seeds, epochs):
-    """GN-2: for each branch, the tests that caught its breaks; a new method's branches have neither tests nor an owner yet"""
+def build_tests(db):
+    """GN-2's view, aimed: (view, None), or (None, why it is too small). Building is apart from scoring, so a harness can take the view and score it its own way"""
     v = TaskView(db, kills=True, calls=True)
     caught = [(s, o) for s, o, p in v.edges if p == gm.CAUGHT_BY]
     srcs = {c for c, _ in caught}
@@ -112,12 +108,21 @@ def job_tests(db, seeds, epochs):
                     eff[place][t] += 1
     v.aim(srcs, tests, caught, v.place, {gm.CAUGHT_BY}, blind_ps={122}, effects=eff)
     if len(srcs) < 10 or len(tests) < 3:
-        return {"skipped": "too small: %d branches with a catching test, %d tests" % (len(srcs), len(tests))}
-    return run_eval(v, seeds, epochs, extra=("popular",))
+        return None, "too small: %d branches with a catching test, %d tests" % (len(srcs), len(tests))
+    return v, None
 
 
-def job_steps(db, seeds, epochs):
-    """GN-4: the requirements a use-case step (or extension) carries; a new use case's steps carry nothing yet"""
+def job_tests(db, seeds, epochs):
+    """GN-2: for each branch, the tests that caught its breaks; a new method's branches have neither tests nor an owner yet"""
+    v, why = build_tests(db)
+    return {"skipped": why} if why else run_eval(v, seeds, epochs, extra=("popular",))
+
+
+GULFS = (128, 129)      # a use case's `gulf of execution` and `gulf of evaluation` name requirements. A new use case has none yet; left heard, they named the answer for 27 to 54% of step links (MEASURED 10-30, every graph)
+
+
+def build_steps(db):
+    """GN-4's view, aimed: (view, None), or (None, why it is too small)"""
     v = TaskView(db)
     import sqlite3
     con = sqlite3.connect(db)
@@ -128,13 +133,19 @@ def job_steps(db, seeds, epochs):
     con.close()
     srcs = {s for s, _ in pairs}
     if len({uc_of.get(s) for s in srcs}) < 3 or len(pairs) < 10:
-        return {"skipped": "too small: %d step links in %d use cases" % (len(pairs), len({uc_of.get(s) for s in srcs}))}
-    v.aim(srcs, v.reqs, pairs, uc_of, {107, 108})
-    return run_eval(v, seeds, epochs)
+        return None, "too small: %d step links in %d use cases" % (len(pairs), len({uc_of.get(s) for s in srcs}))
+    v.aim(srcs, v.reqs, pairs, uc_of, {107, 108}, unit_blind_ps=GULFS)
+    return v, None
 
 
-def job_equivalent(verdicts):
-    """GN-5: of the breaks no test caught, the ones proven to change nothing (the compiled code is the same) are the positives"""
+def job_steps(db, seeds, epochs):
+    """GN-4: the requirements a use-case step (or extension) carries; a new use case's steps carry nothing yet, and its gulfs name nothing yet"""
+    v, why = build_steps(db)
+    return {"skipped": why} if why else run_eval(v, seeds, epochs)
+
+
+def build_equivalent(verdicts):
+    """GN-5's rows: (features, 1 when proven to change nothing, method), or (None, why there are too few)"""
     import survivor_rank as sr
     m = json.load(io.open(verdicts, encoding="utf-8"))["mutants"]
     data = []
@@ -145,7 +156,16 @@ def job_equivalent(verdicts):
         elif why.startswith("every test passed"):
             data.append((sr.features(r), 0, str(r.get("place"))))
     if sum(y for _, y, _ in data) < 5:
-        return {"skipped": "too few proven equivalents (%d)" % sum(y for _, y, _ in data)}
+        return None, "too few proven equivalents (%d)" % sum(y for _, y, _ in data)
+    return data, None
+
+
+def job_equivalent(verdicts):
+    """GN-5: of the breaks no test caught, the ones proven to change nothing (the compiled code is the same) are the positives"""
+    import survivor_rank as sr
+    data, why = build_equivalent(verdicts)
+    if why:
+        return {"skipped": why}
     res, n, pos = sr.by_method(data)
     return {"learned": res[20]["learned"], "operator prior": res[20]["operator prior"], "random": res[20]["random"], "n": n, "positives": pos,
             "measure": "share of the proven equivalents in the first 20% of the ranked survivors"}
@@ -166,8 +186,9 @@ def verdict(row, learned="gnn"):
     return {"wins": row[learned] > plain[best] + MARGIN, "learned": round(row[learned], 3), "best_plain": best, "plain": round(plain[best], 3)}
 
 
-def evaluate(db, verdicts=None, jobs=("owner", "tests", "steps", "equivalent"), seeds=(0,), epochs=300, say=print):
-    row = {"time": time.strftime("%Y-%m-%dT%H:%M:%S"), "graph": os.path.basename(db), "shape": graph_shape(db), "jobs": {}}
+def evaluate(db, verdicts=None, jobs=("owner", "tests", "steps", "equivalent"), seeds=(0,), epochs=None, say=print):
+    # a row names its seeds: run_plan reads every seed on the graph as it is, and a repeat of a seed replaces that seed. A row that names none cannot be told from a repeat
+    row = {"time": time.strftime("%Y-%m-%dT%H:%M:%S"), "graph": os.path.basename(db), "shape": graph_shape(db), "seeds": sorted(seeds), "network": gg.NETWORK, "jobs": {}}
     say("gnn_tasks: %s - %s" % (row["graph"], ", ".join("%s %s" % kv for kv in row["shape"].items())))
     if "owner" in jobs:
         variants = gm.evaluate(db, seeds=seeds, epochs=epochs, say=lambda s: say("  owner " + s.strip()))
@@ -259,11 +280,33 @@ def selftest():
     full = v.adjacency()[gg.RELATION_GROUPS.index("claims")]
     part = v.adjacency([("cell:S-BRANCH:T.M0#b0", "req:R-1")])[gg.RELATION_GROUPS.index("claims")]
     good = int((full > 0).sum()) == 4 and int((part > 0).sum()) == 2
-    good = good and verdict({"gnn": 0.71, "effects": 0.70, "random": 0.1})["wins"] is False \
-        and verdict({"gnn": 0.75, "effects": 0.70, "random": 0.1})["wins"] is True and verdict({"skipped": "too small"})["wins"] is None
+    good = good and verdict({"gnn": 0.715, "effects": 0.70, "random": 0.1})["wins"] is False \
+        and verdict({"gnn": 0.725, "effects": 0.70, "random": 0.1})["wins"] is True and verdict({"skipped": "too small"})["wins"] is None
     small = job_steps(p, (0,), 1)
     good = good and "skipped" in small
     ok &= good
+    # THE GULFS: a held-out use case's gulfs are out of what it hears, a kept one's are not, and with the blinding taken out the leak is back. Before the fix 27 to 54% of step links on
+    # every graph had their answer named through their use case
+    con = sqlite3.connect(p)
+    for uc in ("uc:A", "uc:B"):
+        con.execute("INSERT INTO entity VALUES (?, 'use case', ?, NULL)", (uc, uc))
+        con.execute("INSERT INTO entity VALUES (?, 'step', ?, NULL)", (uc + "#1", uc))
+        con.execute("INSERT INTO edge VALUES (?, 100, ?, 1)", (uc, uc + "#1"))
+        con.execute("INSERT INTO edge VALUES (?, 107, 'req:R-1', 1)", (uc + "#1",))
+        con.execute("INSERT INTO edge VALUES (?, 128, 'req:R-1', 1)", (uc,))
+    con.commit()
+    con.close()
+    g = TaskView(p).aim(["uc:A#1", "uc:B#1"], ["req:R-1"], [("uc:A#1", "req:R-1"), ("uc:B#1", "req:R-1")], {"uc:A#1": "uc:A", "uc:B#1": "uc:B"}, {107, 108}, unit_blind_ps=GULFS)
+    i, j, r = g.index["uc:A"], g.index["uc:B"], g.index["req:R-1"]
+    heard = sum(g.adjacency([("uc:A#1", "req:R-1")]))
+    leaky = TaskView(p).aim(["uc:A#1", "uc:B#1"], ["req:R-1"], [("uc:A#1", "req:R-1"), ("uc:B#1", "req:R-1")], {"uc:A#1": "uc:A", "uc:B#1": "uc:B"}, {107, 108})
+    good = heard[i, r] == 0 and heard[j, r] > 0 and sum(leaky.adjacency([("uc:A#1", "req:R-1")]))[i, r] > 0 and GULFS == (128, 129)
+    ok &= good
+    print("selftest: GULFS a held-out use case does not hear the requirements its gulfs name, a kept one does, and with the blinding out the leak is back %s" % ("PASS" if good else "FAIL"))
+    evaluate(p, jobs=("steps",), seeds=(2, 0), say=lambda s: None)
+    row = json.loads(io.open(os.path.join(d, "gnn_tasks.jsonl"), encoding="utf-8").read().strip().splitlines()[-1])
+    from_row = row["seeds"] == [0, 2] and row["network"] == gg.NETWORK
+    print("selftest: ROW the evidence row names the seeds it measured and the network that measured them %s" % ("PASS" if from_row else "FAIL"))
     print("selftest: AIM a job hides its own true pairs for a held-out source and nothing else; a win needs more than the margin; a "
           "graph too small for a job is skipped with its reason %s" % ("PASS" if good else "FAIL"))
     first = record_cochange(p)
@@ -272,7 +315,7 @@ def selftest():
     con.commit()
     con.close()
     second = record_cochange(p)
-    good = first is None and second == ["code:T.M3"]
+    good = from_row and first is None and second == ["code:T.M3"]
     ok &= good
     print("selftest: COCHANGE the first snapshot records nothing; the next names exactly the method whose statements changed %s" % ("PASS" if good else "FAIL"))
     shutil.rmtree(d, ignore_errors=True)
@@ -288,7 +331,7 @@ def main(argv):
     ap.add_argument("--verdicts")
     ap.add_argument("--jobs", default="owner,tests,steps,equivalent")
     ap.add_argument("--seeds", default="0")
-    ap.add_argument("--epochs", type=int, default=300)
+    ap.add_argument("--epochs", type=int, default=None, help="a fixed count; by default each fit trains until its rank on the training side stops rising")
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)

@@ -16,11 +16,14 @@ being "a fourth store with its own rules". This one is joined to what exists:
   - SQLite, chosen by measurement (a survey of four graph stores, its K3): the fastest of the four installed systems on every
     query shape, and Node 25's built-in node:sqlite reads the same file, so a JavaScript engine can join it.
   - its review format is N-Triples (one W3C triple per line, sorted): two builds of one model are byte-identical.
+  - the documents that describe the model are nodes too (doc_nodes.py, relations 153-166): a build includes them when the model declares them.
+    They are measurements of the documents, not content of the model: no fingerprint reads them and no distance crosses them.
 
 THE ANCHOR COUNT. Every edge carries the evidence FAMILY that asserts it (1 story = the product owner's words, 2 framework = a
 published ergonomics framework, 4 language = the C# language, 8 brainstorm = a persona's question, 16 model = this model's own
 structure, 32 code = exists in the code). A requirement's k is the number of DISTINCT families other than the model's own
-structure behind it - the anchor law: the author's own structure never raises k (ANCHOR API I2). k = 0 for a requirement that is
+structure behind it - the anchor law: the author's own structure never raises k (ANCHOR API I2), and neither does a document (64 document
+marks a link a document makes; only a source or a cell counts towards k). k = 0 for a requirement that is
 not inferred is a hole; k = 1 is listed: it rests on one family, and the question is which independent family would confirm it.
 
 THE CLOSED LOOP (2026-10-28). Closed-loop requirements replace code as what an AI acts on: it writes the code from them and is
@@ -52,8 +55,9 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import usecase_model as ucm  # noqa: E402  the one loader; the graph never parses the model itself
+import doc_nodes  # noqa: E402  the documents as nodes: a leaf, it imports nothing of the loop's
 
-FAMILIES = {1: "story", 2: "framework", 4: "language", 8: "brainstorm", 16: "model", 32: "code"}
+FAMILIES = {1: "story", 2: "framework", 4: "language", 8: "brainstorm", 16: "model", 32: "code", doc_nodes.FAMILY_DOCUMENT: "document"}
 MODEL = 16
 BASIS_FAMILY = {"prose": 1, "framework": 2, "language": 4, "brainstorm": 8, "code": 32}
 SOURCE_FAMILY = {"prose": 1, "quote": 1, "standing": 1, "framework": 2}
@@ -77,9 +81,9 @@ PROPS = [  # (id, label, aliases) - 100..115 as the Anchor store numbers them, 1
     # caught it, the code place each node sits at, the tests a requirement names as its check, and the argument chains agents write
     (147, "mutated as", "broken as"), (148, "killed by", "caught by test"), (149, "checked by", "its own test"),
     (150, "reasons", "chain step"), (151, "cites", "stands on"), (152, "is at", "code place"),
-]
-MEASURED = (136, 142, 146)   # verdicts are measurements of the content, not content: a fingerprint never reads them
-MEASURED_EDGES = (147, 148)  # nor the mutants a run made of it, or the tests that caught them: a new operator never stales a lock
+] + doc_nodes.PROPS
+MEASURED = (136, 142, 146) + doc_nodes.LITERALS   # verdicts are measurements of the content, not content: a fingerprint never reads them
+MEASURED_EDGES = (147, 148) + doc_nodes.RELATIONS  # nor the mutants a run made of it, or the tests that caught them: a new operator never stales a lock; nor a document that names it
 CODE = 32
 # The completeness schema, declared by the store: (rule, kind, filter, edge props, literal props, direction, teach)
 SCHEMA = [
@@ -321,6 +325,7 @@ class KnowledgeGraph(object):
                                                          ("loop", "closed" if model.closed_loop else "not closed"),
                                                          ("verdicts", V.get("trace") or "none")])
         db.commit()
+        doc_nodes.attach(db, model.meta, model.root)     # the documents the model declares; none declared, nothing is added and L20 says so
         return kg
 
     FOLLOW = (100, 116, 107, 108, 121, 134)   # a node's fingerprint takes in what it contains: steps, pathways, requirements, effects
@@ -490,10 +495,11 @@ class KnowledgeGraph(object):
         self.db.commit()
         return [sid for sid, kind, _, _ in rows if kind == "chain step"]
 
-    def distance(self, a, b, limit=4, skip=(150, 151, 124, 147, 148)):
+    def distance(self, a, b, limit=4, skip=(150, 151, 124, 147, 148) + doc_nodes.RELATIONS):
         """the fewest edges between two nodes, either direction, at most `limit` (None beyond it). Never through the chain's own
         cite edges (every pair a step cites would be two apart through the step), a space's membership edge (REVIEW_1 #8: the
-        branch space's one hub put 82% of requirement pairs within 4), or the mutant/test measurements"""
+        branch space's one hub put 82% of requirement pairs within 4), the mutant/test measurements, or a document (one section naming
+        twenty requirements would make them all two apart)"""
         if a == b:
             return 0
         adj = collections.defaultdict(set)
@@ -511,6 +517,7 @@ class KnowledgeGraph(object):
     def counts(self):
         q = lambda sql: self.db.execute(sql).fetchone()[0]
         return {"entities": q("SELECT COUNT(*) FROM entity"), "edges": q("SELECT COUNT(*) FROM edge"),
+                "documents": q("SELECT COUNT(*) FROM entity WHERE kind IN (%s)" % ",".join("'%s'" % k for k in doc_nodes.KINDS)),
                 "literals": q("SELECT COUNT(*) FROM literal"), "schema rules": q("SELECT COUNT(*) FROM schema_rule")}
 
     def export_ntriples(self, path):
@@ -572,6 +579,8 @@ LOOP = [
     Criterion("L16", "OWN-CHECK", "a requirement whose named check is blind to its code breaking: another test noticed, or none", "own_check", loop=True),
     # the prior art's first pick (research_PRIOR_ART_1029.md): equivalents out before survivors are counted, each with its proof
     Criterion("L19", "EQUIVALENT", "a survivor waved off as 'the same program' with no proof, or a proof a test refutes", "equivalent", loop=True),
+    # 2026-10-30: five public numbers went stale in one day and were found by hand, because nothing said which documents describe what
+    Criterion("L20", "DOCUMENTED", "a document that says what is not so, and a change nobody knows which documents to update for", "documented"),
 ]
 
 
@@ -774,7 +783,7 @@ class LoopGate(object):
         for key, why in sorted((self.V.get("equivalent_declared") or {}).items()):
             m = ms.get(key)
             if m is None:
-                out.append(Gap("", "mut:%s" % key, "declared equivalent, but no such mutant: its statement's text changed - read it again"))
+                out.append(Gap("", "mut:%s" % key, "declared equivalent, but no such mutant: an id reads Method@hash: what, as listed under mutants in the kg folder's verdicts.json; if this one did, its statement's text changed - read it again"))
             elif m.get("killed") is True:
                 out.append(Gap("", "mut:%s" % key, "declared equivalent, but a test kills it (%s): a real mutant" % ", ".join((m.get("by") or [])[:2])))
             else:
@@ -785,6 +794,12 @@ class LoopGate(object):
         if tce:
             out.append(Gap("", "the mutants", "%d proven equivalent by their compiled IL (TCE), never run" % tce, failing=False))
         return out
+
+    def documented(self):
+        """L20: the documents the model declares are read into the graph (doc_nodes.py). A document naming a requirement the model does not hold, an authored
+        link that no longer resolves, and a declared set that reads as nothing are ours. A requirement no document describes and a link lost since the ledger
+        are listed: most models have never declared documents, and failing them for it would turn every model red for a thing never asked of them."""
+        return [Gap("", e, m, failing) for e, m, failing in doc_nodes.DocGate(self.kg.db).holes()]
 
     def justified(self):
         """L9: every code unit maps to a requirement or is excluded with its reason"""
@@ -1040,10 +1055,18 @@ def selftest():
     return 0 if ok else 1
 
 
+def _selftest_docs(here):
+    """a document naming every requirement of the selftest's model, and a second one that fabricates one: the model declares the first"""
+    io.open(os.path.join(here, "guide.md"), "w", encoding="utf-8").write("# Guide\n\nR-1, R-2, R-3 and IR-1 are all described here.\n")
+    io.open(os.path.join(here, "guide_fake.md"), "w", encoding="utf-8").write("# Guide\n\nR-1 and the fabricated R-99.\n")
+    return {"documents": [{"as": "guide", "read": "markdown", "path": os.path.join(here, "guide.md")}]}
+
+
 def _loop_data(prose):
     """the selftest model made a closed loop: each requirement with an effect, a term, an entry condition, and verdicts"""
     meta, data = ucm._clean_data(prose)
     meta["loop"] = {"closed": True, "entry": [{"name": "Input", "why": "the player's button, outside the model"}]}
+    meta["docs"] = _selftest_docs(os.path.dirname(prose))
     effects = {"R-1": [{"sets": "Flag", "to": True, "at": "G#s2"}], "R-2": [{"branches": "Flag", "at": "G#s1"}],
                "R-3": [{"calls": "Act", "args": ["Flag"], "at": "G#s1:then"}, {"branches": "Input", "at": "G#s3"}],
                "IR-1": [{"calls": "Fix", "at": "G"}]}
@@ -1109,6 +1132,10 @@ LOOP_PLANTS = [  # (criterion, what, plant(meta, data, verdicts), the kind of ho
     ("L19", "a declared equivalent naming no mutant", lambda m, d, v: v.update(equivalent_declared={"G@gone: x": "same"}), "ours"),
     ("L19", "a survivor declared equivalent", lambda m, d, v: (v["mutants"]["G#s3: the call removed"].update(killed=False, by=[]),
                                                                v.update(equivalent_declared={"G#s3: the call removed": "Act is idempotent"})), "listed"),
+    ("L20", "a document naming a requirement the model does not hold", lambda m, d, v: m["docs"]["documents"][0].update(path=m["docs"]["documents"][0]["path"].replace("guide.md", "guide_fake.md")), "ours"),
+    ("L20", "a declared document set that reads as nothing", lambda m, d, v: m["docs"].update(documents=[]), "ours"),
+    ("L20", "an authored link whose words are gone", lambda m, d, v: m["docs"].update(links=[{"node": "req:R-1", "doc": "doc:guide#guide", "says": "words it never said", "why": "x"}]), "ours"),
+    ("L20", "a model that declares no documents", lambda m, d, v: m.pop("docs"), "listed"),
 ]
 
 
@@ -1144,6 +1171,14 @@ def loop_selftest(tmp, prose):
                (kind == "listed" and not h.failing)]
         ok &= bool(hit)
         print("selftest: LOOP %-4s %-44s -> %s %s" % (cid, what, "CAUGHT (%s)" % kind if hit else "MISSED", hit[0].entity if hit else ""))
+    # L20 lists a ledger line on the clean model, so a plain "something listed" would pass with the plant broken: read the entity itself
+    m, d, vv = copy.deepcopy(meta), copy.deepcopy(data), copy.deepcopy(v)
+    m["docs"]["documents"][0]["path"] = m["docs"]["documents"][0]["path"].replace("guide.md", "guide_fake.md")
+    named = {h.entity for h in next(c for c in LOOP if c.id == "L20").holes(gate(m, d, vv, "plant_l20")) if not h.failing}
+    clean_named = {h.entity for h in next(c for c in LOOP if c.id == "L20").holes(g) if not h.failing}
+    good = "req:R-2" in named and "req:R-2" not in clean_named
+    ok &= good
+    print("selftest: LOOP L20  a requirement no document describes is listed by name, and only then -> %s" % ("PASS" if good else "FAIL"))
     return ok
 
 

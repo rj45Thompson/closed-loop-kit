@@ -55,7 +55,7 @@ class GoalBook(object):
         self.goals, self.variants, self.structure, self.candidate_links = data["goals"], data.get("variants") or [], data.get("structure") or {}, data.get("candidate_links", 20)
         self.project_names, self.rule_names = data.get("projects") or {}, data.get("rules") or {}
         self.rule_stats, self.record_names = data.get("rule_stats") or {}, data.get("records") or {}
-        self.patterns_found, self.attempts = data.get("patterns_found") or [], data.get("attempts") or []
+        self.patterns_found, self.attempts = data.get("patterns_found") or [], [a for a in data.get("attempts") or [] if not a.get("held")]      # held: unpublished until the track that takes only unpublished work closes
         self.jobs = {j: g["id"] for g in self.goals for j in g.get("jobs") or []}
         self.variant_jobs = {v["job"]: v for v in self.variants}
 

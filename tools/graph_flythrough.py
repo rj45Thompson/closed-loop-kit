@@ -54,6 +54,7 @@ OTHER_EDGE = "#34495C"
 KILLED_BY = "killed by"
 BRIGHT_EDGES = 150     # a relation with more edges than this dims in proportion: lines add up, and 5,000 of them burn to plain white
 GNN_LEFT_OUT = {"mutant", "test", "chain", "chain step"}    # graph_gnn.LEFT_OUT (that file needs torch, this one must run without it)
+NOT_DRAWN = ("doc", "stat", "goal")     # doc_nodes.KINDS (its selftest holds the two alike): no layer yet, so they would land on the page as an unlabelled grey ring
 # (hash token, what the view shows, the relations and kinds it keeps): a named question the graph can answer by itself
 VIEWS = [("all", "Everything", None, None),
          ("maps", "How code maps to requirements", {"maps to", "is at"}, {"requirement", "cell", "code"}),
@@ -107,7 +108,7 @@ class GraphLayout(object):
         self.hide = re.compile(hide) if hide else None
         self.anonymous = anonymous
         self.prop = dict(db.execute("select id,label from prop"))
-        self.nodes = {i: {"id": i, "kind": k, "label": l or "", "sub": s} for i, k, l, s in db.execute("select id,kind,label,sub from entity")}
+        self.nodes = {i: {"id": i, "kind": k, "label": l or "", "sub": s} for i, k, l, s in db.execute("select id,kind,label,sub from entity") if k not in NOT_DRAWN}
         self.edges = sorted({(s, self.prop.get(p, str(p)), o) for s, p, o in db.execute("select s,p,o from edge") if s in self.nodes and o in self.nodes})
         db.close()
         self.out = collections.defaultdict(list)

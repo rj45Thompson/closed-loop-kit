@@ -1,5 +1,15 @@
 # Closed loop kit - release notes
 
+## Not released yet
+
+- `closed_loop.py prove` (`prove.py`): every selftest and example of the install, several at once at below-normal priority, ending in one result: what passed, what failed, what gave no answer, what was not run and why. A selftest that hangs is killed and named, one that exits 0 having checked nothing is named and is not a pass, and a selftest that needs PyTorch or scikit-learn on a machine without them is NOT RUN with that said. `install.py` now proves through it, so a full install no longer runs 17 selftests and 2 examples one after another; `--quick` is `prove --quick`.
+- A clean install on a Windows home folder no longer reads INSTALLED WITH FAILURES: `doc_nodes.py`'s selftest resolved its fixtures' citations against the fixture folder, which is inside the project root whenever the temp folder is inside the home folder (ROOT defaults to the home folder). `usecase_model.py`'s selftest printed no check line in the form every other tool uses, so a runner could not tell it from one that checked nothing; each of its checks now ends in PASS or FAIL.
+- `install.py` no longer imports PyTorch to see whether it is there (it asks for it by name): on a machine that had it, that was about 50 seconds of a loaded first run.
+- The README says where the tools folder is, how to set `CLOSED_LOOP_ROOT` in PowerShell and cmd (the bash form fails there), the options of `ask`, and what a first run costs.
+- `doc_nodes.py`: the documents as nodes in the graph, `what-to-update <node>`, and criterion L20 DOCUMENTED, which makes 18 criteria.
+- `loop_tick.py finish` sets the records going: it rewrites the Goals List and Stats List, rebuilds the growth page when that tool and a site are present, and prints the documents that describe the stat in `--targets`; `start` prints what the two lists ask. A step whose tool is not installed says so and is skipped; a step that fails makes `finish` exit 1.
+- `improvement.py`: a requirement can be about one score inside a stat that is a dict (`derived: {key: ...}`), in its trigger and in the outcome of a tick that targeted it. Totalling the dict moved with every rival rule's score and said nothing about the learned part's own.
+
 ## 0.1.2 (2026-10-30): first public release
 
 - MIT licence, and a README written for someone arriving at the repository.

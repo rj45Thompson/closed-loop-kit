@@ -128,7 +128,7 @@ def pass_view(db, kills=False, calls=False):
     return RichView(db, kills=kills, calls=calls)
 
 
-def evaluate(db, seeds=(0, 1), folds=5, epochs=300, say=print):
+def evaluate(db, seeds=(0, 1), folds=5, epochs=None, say=print):
     with_kill_vote()
     rows = {}
     for name, kw in (("as today", {}), ("+ caught by", {"kills": True}), ("+ calls", {"calls": True}), ("+ both", {"kills": True, "calls": True})):
@@ -140,7 +140,7 @@ def evaluate(db, seeds=(0, 1), folds=5, epochs=300, say=print):
         say("  %-12s added %-34s GNN MRR %.2f; plain rules: %s; best plain %s %.2f -> %s" % (
             name, ", ".join("%s %d" % kv for kv in sorted(v.added.items())) or "nothing", mrr["gnn"],
             ", ".join("%s %.2f" % (b, mrr[b]) for b in gg.BASELINES if b != "random"), best, mrr[best],
-            "the GNN BEATS it" if mrr["gnn"] > mrr[best] else "the GNN does not beat it"))
+            "the GNN BEATS it" if mrr["gnn"] > mrr[best] + gg.MARGIN else "the GNN does not beat it"))
     return rows
 
 

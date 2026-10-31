@@ -1,0 +1,57 @@
+# A filled draft of prd.md. Copy it to <model folder>/draft.yml and run: closed_loop.py grow prd.md --out <model folder>
+subject: Tool Library
+actors:
+- {name: Volunteer, kind: person, profile: the person at the desk}
+- {name: Member, kind: person, profile: a member of the library}
+requirements:
+- {id: R1, cite: ["9.1"], quote: "at most three tools at a time", says: A member can have at most three tools on loan at a time., check: lend a fourth tool to a member; it is refused}
+- {id: R2, cite: ["9.2"], quote: "A loan lasts seven days", says: A loan lasts seven days., check: make a loan and read its due date}
+- {id: R3, cite: ["9.3"], quote: "cannot borrow another until it is returned", says: A member with an overdue tool cannot borrow another until it is returned., check: lend to a member with an overdue tool; it is refused until the tool is back}
+- {id: R4, cite: ["9.4"], quote: "must scan the member card before lending", says: The volunteer must scan the member card before lending., check: try to record a loan with no card scanned; it is refused}
+- {id: R5, cite: ["13.1"], quote: "checked by the volunteer before it goes back on the shelf", says: A returned tool is checked by the volunteer before it goes back on the shelf., check: return a tool; it is not on the shelf until checked}
+- {id: R6, cite: ["13.2"], quote: "taken off the shelf until it is repaired", says: A damaged tool is taken off the shelf until it is repaired., check: mark a tool damaged; it cannot be lent until repaired}
+- {id: R7, cite: ["17.1"], quote: "one credit for each day it is late", says: A tool returned late costs the member one credit for each day it is late., check: return a tool two days late; the member pays two credits}
+- {id: R8, cite: ["17.2"], quote: "no credits left cannot borrow", says: A member with no credits left cannot borrow., check: lend to a member with no credits; it is refused}
+- {id: R9, cite: ["5.2"], quote: "records every loan", says: The volunteer records every loan., check: make ten loans; each one is in the record}
+- id: R10
+  inferred: step 4 of 'Lend a tool' records the loan, and no sentence says what a loan record must hold
+  needs: what a loan record holds
+  says: A loan record names the member, the tool and the due date.
+  check: make a loan and read its record
+- id: R11
+  inferred: step 1 of 'Pay a late fee' counts the days late, and no sentence says from which day a tool counts as late
+  needs: from which day a tool counts as late
+  says: A tool is late from the day after its due date.
+  check: return a tool on its due date and one a day after; only the second is charged
+goals:
+- name: Lend a tool
+  actor: Volunteer
+  steps:
+  - {do: The volunteer scans the member card, reqs: [R4]}
+  - {do: The volunteer checks that the member may borrow, reqs: [R1, R3, R8]}
+  - {do: The volunteer scans the tool, reqs: [R9]}
+  - {do: The loan is recorded with its due date, reqs: [R2, R9, R10]}
+  ext:
+  - {at: 2, when: the member already has three tools out, do: the loan is refused, out: end minimal, reqs: [R1]}
+  - {at: 2, when: the member has an overdue tool, do: the loan is refused until the tool is returned, out: end minimal, reqs: [R3]}
+  - {at: 2, when: the member has no credits left, do: the loan is refused, out: end minimal, reqs: [R8]}
+- name: Take a tool back
+  actor: Volunteer
+  steps:
+  - {do: The member hands the tool back, reqs: [R5]}
+  - {do: The volunteer checks the tool, reqs: [R5]}
+  - {do: A damaged tool is taken off the shelf, reqs: [R6]}
+  - {do: A late return is charged, reqs: [R7]}
+  - {do: The tool goes back on the shelf, reqs: [R5]}
+  ext:
+  - {at: 2, when: the tool is damaged, do: it is taken off the shelf until repaired, out: rejoin 4, reqs: [R6]}
+- name: Pay a late fee
+  actor: Member
+  steps:
+  - {do: The days late are counted, reqs: [R11]}
+  - {do: The credits are taken from the member, reqs: [R7]}
+  - {do: The member's credits are checked, reqs: [R8]}
+  ext:
+  - {at: 3, when: the member has no credits left, do: the member cannot borrow, out: end minimal, reqs: [R8]}
+exclude:
+- {cites: ["5.1"], why: "the purpose: says why the library exists and states no rule"}

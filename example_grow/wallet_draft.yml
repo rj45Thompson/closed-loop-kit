@@ -1,0 +1,62 @@
+# A filled draft of wallet_epic.md: what an agent writes after reading the numbered sentence. Copy it to <model folder>/draft.yml and run the grow command.
+subject: A store's wallet
+actors:
+- {name: Shopper, kind: person, profile: buys from the store with the money in their wallet}
+requirements:
+- id: R1
+  cite: ["1.1"]
+  quote: "pays only what it holds"
+  says: The wallet pays only what it holds, and never a negative price.
+  check: try to pay more than the wallet holds, and a negative price; both are refused
+- id: R2
+  cite: ["1.1"]
+  quote: "a limited line sells out"
+  says: A limited line sells its quantity and is then sold out.
+  check: buy a line of 2 three times; the third is refused as sold out
+- id: R3
+  cite: ["1.1"]
+  quote: "an unlimited one never does"
+  says: An unlimited line never sells out.
+  check: buy an unlimited line a thousand times; each purchase works
+- id: R4
+  cite: ["1.1"]
+  quote: "the display holds eight digits"
+  says: The wallet shows at most eight digits, so it never holds more than 99999999.
+  check: add money past 99999999; it is refused
+- id: R5
+  inferred: step 3 of 'Buy one item' follows a refused payment, and no sentence says what happens to the stock when the wallet cannot pay
+  needs: what happens to the stock when a purchase is refused
+  says: A purchase refused for lack of money changes neither the wallet nor the stock.
+  check: attempt a purchase the wallet cannot pay for; the wallet and the stock are as before
+- id: R6
+  inferred: step 1 of 'Stock the store' sets a quantity for each line, and no sentence says how an unlimited line is told apart from a limited one
+  needs: how an unlimited line is stocked
+  says: A line is stocked with its price and either a quantity or the mark for unlimited.
+  check: stock one line of each kind and ask how many are left
+goals:
+- name: Stock the store
+  actor: Shopper
+  steps:
+  - {do: A line is stocked with its price, reqs: [R6]}
+  - {do: A limited line takes a quantity, reqs: [R2]}
+  - {do: An unlimited line takes the unlimited mark, reqs: [R3]}
+  ext:
+  - {at: 2, when: the quantity is zero, do: the line is sold out from the start, out: rejoin 3, reqs: [R2]}
+- name: Buy one item
+  actor: Shopper
+  steps:
+  - {do: The shopper picks a line, reqs: [R2]}
+  - {do: The wallet is asked to pay the price, reqs: [R1]}
+  - {do: The price is taken and a limited line counts down, reqs: [R1, R2]}
+  - {do: The wallet never shows more than eight digits, reqs: [R4]}
+  ext:
+  - {at: 2, when: the wallet holds less than the price, do: the purchase is refused and nothing changes, out: end minimal, reqs: [R5]}
+- name: Read the wallet
+  actor: Shopper
+  steps:
+  - {do: The shopper looks at the display, reqs: [R4]}
+  - {do: The display shows what the wallet holds, reqs: [R1]}
+  - {do: The display never needs a ninth digit, reqs: [R4]}
+  ext:
+  - {at: 2, when: the wallet is empty, do: the display shows zero, out: end success, reqs: [R1]}
+exclude: []

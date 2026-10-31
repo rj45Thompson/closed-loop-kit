@@ -60,6 +60,12 @@ def value(row, req):
         num, den = d["ratio"]
         a, b = row.get(num), sum(row.get(x) or 0 for x in den)
         return None if a is None or not b else a / float(b)
+    if d and "key" in d:
+        # the stat is a dict of scores and the requirement is about ONE of them (gnn_mrr holds the owner network's score beside the plain rules'):
+        # totalling the dict, as scalar() does, moves with every rule's score and says nothing about the network (MEASURED 10-30 by planting a
+        # worsening on a copy: the outcome of a tick on the owner score read +0.19 for a +0.23 move)
+        v = row.get(req["stat"])
+        return v.get(d["key"]) if isinstance(v, dict) else None
     return row.get(req["stat"])
 
 
@@ -174,10 +180,12 @@ def check(models=MODELS, reg=REG, say=print, ledger_path=LEDGER):
     return fired
 
 
-def outcomes(ledger, models):
+def outcomes(ledger, models, reg=REG):
     """[(item, stat, before, after, moved)] for each finished tick that named the stat it targeted: the stat's value in the last pass
-    BEFORE the tick and the first pass AFTER it, on any model that has both"""
+    BEFORE the tick and the first pass AFTER it, on any model that has both. A stat read as one score of a dict is read as its trigger reads it"""
     out = []
+    keyed = {r["stat"]: r for r in load(reg)[0] if (r.get("derived") or {}).get("key")}
+    read = lambda row, stat: scalar(value(row, keyed[stat])) if stat in keyed else scalar(row[stat])
     rows = {os.path.basename(os.path.dirname(os.path.abspath(m))): rows_of(m) for m in models}
     for t in ledger:
         stat = t.get("targets")
@@ -188,7 +196,7 @@ def outcomes(ledger, models):
             before = [r for r in rs if _epoch(r.get("time")) <= start and stat in r]
             after = [r for r in rs if _epoch(r.get("time")) > t["t"] and stat in r]
             if before and after:
-                a, b = scalar(before[-1][stat]), scalar(after[0][stat])
+                a, b = read(before[-1], stat), read(after[0], stat)
                 out.append({"item": t.get("item"), "stat": stat, "model": name, "before": a, "after": b,
                             "moved": None if a is None or b is None else b - a})
     return out
@@ -327,6 +335,23 @@ def selftest():
     print("selftest: GRAPH a tick that named its stat gets the outcome it measured; a fired trigger no tick acted on since its pass is ENDED's "
           "gap, overdue after %d ticks; a tick before the pass does not end it, one after does; a tick with no target is VERIFIED's %s" % (
               ENDED_WITHIN, "PASS" if good else "FAIL %s" % [own["fired_without_action"], own2, own3, state]))
+    # KEY: a stat that is a dict of scores, with the requirement about one of them: its trigger and its outcome read that one, not the total
+    kr = [{"time": "2026-10-29T10:00:00", "s": {"gnn": 0.8, "w": 0.5}}, {"time": "2026-10-29T11:00:00", "s": {"gnn": 0.5, "w": 0.9}},
+          {"time": "2026-10-29T12:00:00", "s": {"gnn": 0.7, "w": 0.9}}]
+    keyed = {"stat": "s", "derived": {"key": "gnn"}, "trigger": {"falls": 1}}
+    k = os.path.join(t, "k", "model")
+    os.makedirs(k)
+    kreg = os.path.join(t, "kreg.yaml")
+    io.open(kreg, "w", encoding="utf-8").write("requirements:\n  - {id: IMP-K, stat: s, derived: {key: gnn}, trigger: {falls: 1}, action: {area: tests}}\nbanked: []\n")
+    io.open(led, "w", encoding="utf-8").write(json.dumps({"item": "K-1", "targets": "s", "minutes": 5, "t": _epoch("2026-10-29T10:30:00")}) + "\n")
+    flat = fires(dict(keyed, derived=None), kr[:2])[0]                     # the total rose 1.3 -> 1.4: a plain read cannot see the network fall
+    got = fires(keyed, kr[:2])[0]
+    io.open(os.path.join(t, "k", "stats.jsonl"), "w", encoding="utf-8").write("".join(json.dumps(r) + "\n" for r in kr))
+    out = outcomes(read_ledger(led), [k], kreg)
+    good = got is True and flat is False and len(out) == 1 and abs(out[0]["moved"] - (0.5 - 0.8)) < 1e-9      # the total went 1.3 -> 1.4, +0.1
+    ok &= good
+    print("selftest: KEY a stat that is a dict of scores, with the requirement about one of them, fires and is measured on that score, not on the dict's total (the total rises while the score falls) %s" % (
+        "PASS" if good else "FAIL %s" % [got, flat, out]))
     shutil.rmtree(t, ignore_errors=True)
     print("selftest: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1

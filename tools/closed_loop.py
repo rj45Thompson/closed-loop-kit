@@ -18,7 +18,10 @@ chain_check.py, Blueprint traces only). This runs them as one, over a C# model, 
 
 A chain: chain: {id, by, when, question, steps: [{says, cites: [REQ-ID | Q-ID | Type.Method ...]}]}
 
+    python -X utf8 closed_loop.py grow <epic, PRD, ticket export or transcript> --out <model folder>   a first model from text, without inventing (grow.py)
+    python -X utf8 closed_loop.py ask <model folder> [--answer ...]                                  the next question from the holes in the chain (ask.py)
     python -X utf8 closed_loop.py run <model> [--chain C.yaml ...] [--no-kill] [--out REPORT.md]
+    python -X utf8 closed_loop.py prove [--quick]                                                    every selftest and example of this folder, together; one result (prove.py)
     python -X utf8 closed_loop.py --selftest
 
 Exit 0 = the loop holds on every hole of ours and every chain is grounded; 1 = a hole of ours or an ungrounded chain step; 2 = could
@@ -302,13 +305,13 @@ def owner_section(dbp, plan, gg=None, gm=None):
         import graph_gnn as gg
     hearing = {"kills": bool(plan["relation caught by"]["on"]), "calls": bool(plan["relation calls"]["on"])}
     v = gm.pass_view(dbp, **hearing)
-    res = gg.evaluate(v, 5, 0, 300, "method")
+    res = gg.evaluate(v, 5, 0, None, "method")
     text, beats = gg.report(res, "method")
     out = ["## 6. Who owns each branch: the GNN proposer, measured first\nThe plan has it on: %s. It hears: %s.\n```\n%s\n```" % (
         owner["why"], ", ".join(n for n, k in (("caught by", "kills"), ("calls", "calls")) if hearing[k]) or "the graph as it stands", text)]
     unowned = [c for c in v.cells if not any(cc == c for cc, _ in v.links)]
     if beats and unowned:
-        proposer = gg.LinkProposer(v, 0, 300).fit(v.links, [])
+        proposer = gg.LinkProposer(v, 0, None).fit(v.links, [])
         out.append("Proposals (questions, never claims - a person or an exact check accepts one):")
         for c in unowned:
             conf = proposer.confidence(c)
@@ -474,8 +477,8 @@ def run(model_dir, chains, kill, out, reuse=True, workers=2, pin=None, gnn=False
         rc = gate.run(True, 8)
     said = buf.getvalue()
     c = kg.counts()
-    lines.append("## 4. The closed loop (usecase_kg.py, %d criteria), on the graph: %d nodes, %d edges, %d literals -> %s (%d triples)"
-                 % (len(kgm.LOOP), c["entities"], c["edges"], c["literals"], cs.shown(dbp), ntriples))
+    lines.append("## 4. The closed loop (usecase_kg.py, %d criteria), on the graph: %d nodes (%d of them documents, stats and goals), %d edges, %d literals -> %s (%d triples)"
+                 % (len(kgm.LOOP), c["entities"], c["documents"], c["edges"], c["literals"], cs.shown(dbp), ntriples))
     lines.append("```\n" + "\n".join(l for l in said.splitlines() if l.strip()) + "\n```")
     # THE MODAL READING (prior art: Modal Transition Systems, Larsen & Thomsen 1988): an authored or derived requirement is a MUST,
     # an inferred one a MAY only its owner settles; the requirements are closed when no may is left - relative to what the
@@ -528,15 +531,37 @@ def run(model_dir, chains, kill, out, reuse=True, workers=2, pin=None, gnn=False
     if not out:
         out = os.path.join(kgdir, "CLOSED_LOOP.md")
         io.open(out, "w", encoding="utf-8", newline="\n").write(report + "\n" + verdict + "\n")
+    doc_stats, doc_lines = documents_to_update(model, dbp)
     if kill and not self_improve_on(model_dir, self_improve):
         print("closed_loop: self-improvement is off: no row in the morph log, no picks")
     elif kill:
         import loop_stats
-        row = loop_stats.MorphLog(model_dir).add(loop_stats.PassStats(model_dir, out, time.time() - started, note).collect())
+        prev = (loop_stats.MorphLog(model_dir).rows() or [None])[-1]
+        row = loop_stats.MorphLog(model_dir).add(loop_stats.PassStats(model_dir, out, time.time() - started, note, doc_stats).collect())
         print("closed_loop: pass %d recorded in %s" % (row["n"], cs.shown(loop_stats.MorphLog(model_dir).path)))
+        moved = []
+        if prev and (model.meta.get("docs") or {}).get("claims"):
+            import claims
+            moved = claims.PassDocuments.moved(dbp, prev, row)
+        doc_lines = moved + doc_lines
         for line in loop_stats.summary(model_dir):     # the stats choose what to improve next, and every 20 passes a report
             print("closed_loop: " + line)
+    for line in doc_lines:                              # THE DOCUMENTS to change, whatever the pass recorded (C1 graph, C2 claims)
+        print("closed_loop: " + line)
     return worst
+
+
+def documents_to_update(model, dbp):
+    """(stats, lines): the documents a pass leaves to change, from the claim registry the model names (meta.docs.claims, a path under the project root) and the
+    graph's own documents. A model that names none, or an install without claims.py, says so in a line: never read as nothing to update"""
+    docs = model.meta.get("docs") or {}
+    if not docs.get("claims"):
+        return {}, ["documents to update: this model names no claim registry (meta.docs.claims), so a moved number cannot be followed to its documents"]
+    try:
+        import claims
+    except ImportError:
+        return {}, ["documents to update: this install has no claim registry (claims.py): not looked up"]
+    return claims.PassDocuments.report(os.path.join(ROOT, docs["claims"]), dbp)
 
 
 def plan_obeyed():
@@ -701,6 +726,16 @@ public class Mixed {
 
 
 def main(argv):
+    # the front door (2026-10-31): `grow` writes a first model from text, `ask` puts the model's holes to its producer one at a time. Both are
+    # plain programs that need no key; they live in grow.py and ask.py and share this command so a new user meets one entry point
+    if argv and argv[0] in ("grow", "ask"):
+        import ask
+        import grow
+        return (grow if argv[0] == "grow" else ask).main(argv)
+    # `prove` runs every selftest and the examples of the folder these tools are in, together, and says in one result what passed (prove.py)
+    if argv and argv[0] == "prove":
+        import prove
+        return prove.main(argv[1:])
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", nargs="?", choices=["run"])
     ap.add_argument("model", nargs="?")

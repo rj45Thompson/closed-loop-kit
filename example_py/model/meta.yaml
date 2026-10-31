@@ -28,6 +28,10 @@ meta:
       why: 'the amount a wallet is made with: the caller''s, outside the model'
     branches:
       claims:
+      - method: shop.CONSTANTS
+        reqs:
+        - W-2
+        why: the most its eight-digit display shows
       - method: shop.Wallet.__init__
         reqs:
         - W-2

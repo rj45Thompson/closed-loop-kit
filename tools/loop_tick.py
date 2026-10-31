@@ -32,8 +32,10 @@ import argparse
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -159,6 +161,9 @@ def start(lock=LOCK, now=None, procs=None, cpu=None, stop=STOP, runs_log=RUNS_LO
     duty = epoch_duty(len([r for r in _rows(ledger) if "item" in r]))
     if duty:
         said += "\n  " + duty
+    asks = lists_ask(here)
+    if asks:
+        said += "\n  " + asks
     for log, cmd, outcome in harvests:
         said += "\n  TO HARVEST: %s  %s  (%s)" % (outcome, log, cmd[:140])
     new = refused(PROMPTS, ledger)
@@ -181,6 +186,122 @@ def epoch_duty(done):
     if at == EPOCH - 1:
         return "EPOCH %d ENDS: this tick is the BENCHMARK (%s)" % (e, runbook("section 4b", "section 5"))
     return None
+
+
+# WHAT A FINISHED TICK SETS GOING, so a change it made reaches every record that describes it (measured 10-30 by planting a worsening of one stat
+# on a copy and following it: no tick rewrote the Goals List and Stats List, rebuilt the growth page or named the documents, so each was only as
+# fresh as the last person who remembered). The step names are the unit a check removes one of. A step whose tool this install does not have says so
+# and is skipped; a step that runs and fails is reported and makes `finish` exit 1, after the ledger row is written.
+FINISH_STEPS = ("lists", "growth", "documents", "claims")
+
+
+def _call(here, args, timeout=900):
+    try:
+        p = subprocess.run([sys.executable, "-X", "utf8"] + list(args), cwd=here, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 124, "TIMEOUT after %d s: %s" % (timeout, " ".join(str(a) for a in args)[:120])
+    return p.returncode, p.stdout + p.stderr
+
+
+def _last(text):
+    lines = [l for l in text.splitlines() if l.strip()]
+    return lines[-1].strip() if lines else "no output"
+
+
+def step_lists(here, row):
+    """the Goals List and Stats List rewritten (gnn_goals.py --write): a score or a verdict that moved is logged, and the passes since are in its timeline"""
+    tool, lists = os.path.join(here, "gnn_goals.py"), os.path.join(here, "gnn_goals.json")
+    if not (os.path.exists(tool) and os.path.exists(lists)):
+        return None, "lists: this install has no Goals List (gnn_goals.py and gnn_goals.json): not rewritten"
+    rc, out = _call(here, [tool, "--write", lists])
+    return rc, "lists: %s%s" % (_last(out), "" if rc == 0 else " (exit %d: a job no goal claims, or a trained goal with no record: gnn_goals.py --check says which)" % rc)
+
+
+def growth_site(here):
+    site = os.environ.get("CLOSED_LOOP_SITE")
+    f = os.path.join(here, "growth_site.txt")
+    if not site and os.path.exists(f):
+        site = io.open(f, encoding="utf-8").read().strip()
+    return os.path.normpath(os.path.join(here, site)) if site else None
+
+
+def step_growth(here, row):
+    """the growth page rebuilt (growth.py --site): it refuses a missing or unreadable log, and that refusal is this tick's to read, not to skip"""
+    tool = os.path.join(here, "growth.py")
+    if not os.path.exists(tool):
+        return None, "growth: this install has no growth page (growth.py): not rebuilt"
+    site = growth_site(here)
+    if not site:
+        return None, "growth: no site is named (set CLOSED_LOOP_SITE, or write the folder into growth_site.txt beside this tool): not rebuilt"
+    rc, out = _call(here, [tool, "--site", site])
+    return rc, "growth: %s" % _last(out)
+
+
+def step_documents(here, row, limit=8):
+    """the documents that describe the stat this tick targeted, from the graph of the tool itself (doc_nodes.py what-to-update). A stat the graph
+    does not hold is said to be unknown, which says nothing about its documents"""
+    stat = row.get("targets")
+    tool, store, model = os.path.join(here, "doc_nodes.py"), os.path.join(here, "selfmodel", "kg", "selfmodel.sqlite"), os.path.join(here, "selfmodel", "model")
+    if not stat:
+        return None, "documents: this tick named no target stat, so no document is looked up"
+    if not (os.path.exists(tool) and os.path.exists(store) and os.path.isdir(model)):
+        return None, "documents: this install has no graph of its own documents (doc_nodes.py, selfmodel/): not looked up"
+    tmp = tempfile.mkdtemp(prefix="loop_tick_docs_")
+    try:
+        copy = os.path.join(tmp, "docs.sqlite")
+        rc, out = _call(here, [tool, "attach", store, "--model", model, "--out", copy])
+        if rc != 0:
+            return rc, "documents: attaching the documents to the graph failed: %s" % _last(out)
+        node = "stat:morph/%s" % stat
+        rc, out = _call(here, [tool, "what-to-update", node, "--db", copy])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    if rc == 2:
+        return None, "documents: the graph holds no node %s, which says nothing about the documents that describe it" % node
+    if rc != 0:
+        return rc, "documents: what-to-update failed: %s" % _last(out)
+    pieces = [l.strip() for l in out.splitlines() if l.strip().startswith("doc:")]
+    return 0, "documents to update for %s (%d):\n%s" % (node, len(pieces), "\n".join("  " + p[:170] for p in pieces[:limit]))
+
+
+def step_claims(here, row, limit=10):
+    """the public numbers gone stale against their records, and the documents to change for each (claims.py stale). A stale claim is what this step is for, so it is
+    printed and is not a failure; an install without claims.py says so and is skipped"""
+    tool = os.path.join(here, "claims.py")
+    if not os.path.exists(tool):
+        return None, "claims: this install has no claim registry (claims.py): not looked up"
+    rc, out = _call(here, [tool, "stale"])
+    if rc not in (0, 1):
+        return rc, "claims: claims.py stale failed (exit %d): %s" % (rc, _last(out))
+    lines = [l.rstrip() for l in out.splitlines() if l.strip()]
+    return 0, "claims: %s\n%s" % (lines[-1].strip() if lines else "no output", "\n".join("  " + l.strip()[:170] for l in lines[:-1][:limit]))
+
+
+STEP_FUNCS = {"lists": step_lists, "growth": step_growth, "documents": step_documents, "claims": step_claims}
+
+
+def after_finish(row, here=HERE, steps=None, say=print):
+    """run the finish steps in order; the number that ran and failed (a skipped step is not a failure, and says why it was skipped)"""
+    failed = 0
+    for name in FINISH_STEPS if steps is None else steps:
+        rc, words = STEP_FUNCS[name](here, row)
+        say("loop_tick: " + words)
+        failed += 1 if rc else 0
+    return failed
+
+
+def lists_ask(here=HERE):
+    """what the Goals List and Stats List ask for, from the lists a finished tick last wrote: a goal that lost to a plain rule asks for that rule's
+    stat as an input; a stat no goal reads asks for a goal; a stat a goal uses that no requirement reads asks for one. A tick reads these when it starts"""
+    p = os.path.join(here, "gnn_goals.json")
+    if not os.path.exists(p):
+        return ""
+    asks = json.load(io.open(p, encoding="utf-8")).get("asks") or {}
+    goals, stats, unread = asks.get("goals_ask_stats") or [], asks.get("stats_ask_goals") or [], asks.get("used_unread") or []
+    if not (goals or stats or unread):
+        return ""
+    return "THE LISTS ASK (gnn_goals.json): %d goal(s) that lost to a plain rule ask for its stat as an input (%s); %d stat(s) no goal reads ask for a goal (%s); %d stat(s) a goal uses that no requirement reads" % (
+        len(goals), ", ".join("%s <- %s" % (g["goal"], g["stat"]) for g in goals[:4]) or "none", len(stats), ", ".join(stats[:4]) or "none", len(unread))
 
 
 def beat(lock=LOCK, now=None):
@@ -352,6 +473,41 @@ def selftest():
     ok &= good
     print("selftest: LAUNCH a detached run's exit code is read from its log, one with no exit line is DIED, a harvested one is not "
           "listed again, a second run while one is going is refused %s" % ("PASS" if good else "FAIL"))
+    # FINISH: what a finished tick sets going. Stub tools stand where the real ones would; each step is called, a step that fails is counted and
+    # does not stop the rest, a missing tool is skipped with its reason, and a node the graph lacks is said to be unknown, not a failure
+    h = os.path.join(t, "install")
+    os.makedirs(os.path.join(h, "selfmodel", "model"))
+    os.makedirs(os.path.join(h, "selfmodel", "kg"))
+    for name, code in (("gnn_goals.py", "import sys; open(sys.argv[2] + '.ran', 'w').write('x'); print('gnn_goals: written')"),
+                       ("growth.py", "import sys; print('growth: REFUSED - log missing: x'); sys.exit(2)"),
+                       ("doc_nodes.py", chr(10).join(["import sys", "if sys.argv[1] == 'attach': open(sys.argv[-1], 'w').write('x')",
+                                                      "elif 'unknown' in sys.argv[2]: print('UNKNOWN'); sys.exit(2)",
+                                                      "else: print('stat:morph/s (stat)'); print('  doc:manual#gnn  The network  [m.html:1]')"])),
+                       ("claims.py", chr(10).join(["import sys", "print('STALE sv_caught: pages print 206; the record says 200 (a record)')", "print('    print  doc:slide#flatter')",
+                                                    "print('1 stale of 5 claims')", "sys.exit(1)"]))):
+        io.open(os.path.join(h, name), "w", encoding="utf-8").write(code + chr(10))
+    io.open(os.path.join(h, "gnn_goals.json"), "w", encoding="utf-8").write(json.dumps({"asks": {"goals_ask_stats": [{"goal": "owner", "stat": "killed"}], "stats_ask_goals": ["a", "b"], "used_unread": ["x"]}}))
+    io.open(os.path.join(h, "selfmodel", "kg", "selfmodel.sqlite"), "w").write("x")
+    io.open(os.path.join(h, "growth_site.txt"), "w").write("site")
+    said = []
+    failed = after_finish({"targets": "s"}, h, say=said.append)
+    skipped = []
+    bare = after_finish({"targets": "s"}, os.path.join(t, "nothing"), say=skipped.append) if os.makedirs(os.path.join(t, "nothing")) is None else 0
+    unknown = []
+    after_finish({"targets": "unknown_stat"}, h, steps=("documents",), say=unknown.append)
+    just = []
+    after_finish({}, h, steps=("lists",), say=just.append)
+    good = failed == 1 and len(said) == 4 and said[0].startswith("loop_tick: lists: gnn_goals: written") and "REFUSED" in said[1] and os.path.exists(os.path.join(h, "gnn_goals.json.ran"))         and "documents to update for stat:morph/s (1):" in said[2] and "doc:manual#gnn" in said[2]         and said[3].startswith("loop_tick: claims: 1 stale of 5 claims") and "doc:slide#flatter" in said[3] and "sv_caught" in said[3]         and bare == 0 and all("not " in x for x in skipped) and len(skipped) == 4 and "no node stat:morph/unknown_stat" in unknown[0] and len(just) == 1         and growth_site(h) == os.path.normpath(os.path.join(h, "site")) and after_finish({}, h, steps=("documents",), say=just.append) == 0
+    ok &= good
+    print("selftest: FINISH a finished tick rewrites the lists, rebuilds the growth page and names the documents of its target; a step that fails is counted and does not stop the rest; "
+          "a missing tool, no target and a node the graph lacks are said and skipped, not failed; "
+          "the stale public numbers and the places to change are printed and are not a failure %s" % ("PASS" if good else "FAIL %s" % [failed, said, skipped, unknown]))
+    asked = lists_ask(h)
+    good = "1 goal(s) that lost" in asked and "owner <- killed" in asked and "2 stat(s) no goal reads" in asked and lists_ask(os.path.join(t, "nothing")) == ""         and lists_ask(h) in start(os.path.join(t, "l2"), now=70000.0, procs=[], cpu=5.0, stop=stop, runs_log=rl, alive=none, ledger=ledger, here=h, watch=w, hold=os.path.join(t, "no_hold"))[1]
+    if os.path.exists(os.path.join(t, "l2")):
+        os.remove(os.path.join(t, "l2"))
+    ok &= good
+    print("selftest: ASKS what the two lists ask is read from the lists a tick last wrote and printed when the next tick starts %s" % ("PASS" if good else "FAIL"))
     shutil.rmtree(t, ignore_errors=True)
     print("selftest: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
@@ -397,8 +553,12 @@ def main(argv):
     if a.cmd == "finish":
         if not (a.item and a.minutes is not None and a.found and a.worth):
             ap.error("finish needs --item, --minutes, --found and --worth")
-        print("loop_tick: " + json.dumps(finish(a.item, a.minutes, a.found, a.worth, targets=a.targets)))
-        return 0
+        row = finish(a.item, a.minutes, a.found, a.worth, targets=a.targets)
+        print("loop_tick: " + json.dumps(row))
+        failed = after_finish(row)
+        if failed:
+            print("loop_tick: %d finish step(s) failed after the ledger row was written: read them above" % failed)
+        return 1 if failed else 0
     if a.cmd == "show":
         for r in _rows(LEDGER)[-a.last:]:
             print("  %s  %-10s %3s min  worth %-7s %s" % (r["time"][:16], r["item"], r["minutes"], r["worth"], r["found"][:110]))
