@@ -14,7 +14,7 @@ THE PIECES:
   Trend       one stat across the passes, read against the direction its kind should move (improving / worsening / stalled / done)
   Predictors  CANDIDATE predictive pairs: a change in X this pass against the change in Y the next, with n, anecdotes and
               arithmetic (mechanical) pairs labelled
-  NextImprovement  the stats choose the next improvement: worsening beats stalled; the graph-for-GNN tune is due every 5 passes
+  NextImprovement  the stats choose the next improvement: worsening beats stalled; on a project whose passes measure the GNN, its tune is due every 5 passes
   PeriodicReport   every 20 passes: trends, the graph's growth (this model and the loop's own), predictors, tunes, the pick
 
     python -X utf8 loop_stats.py record <model> [--report R.md] [--seconds S] [--note "..."]
@@ -425,7 +425,8 @@ class Predictors(object):
 class NextImprovement(object):
     """The stats themselves choose what to improve next. Each AREA names the stats that
     speak for it; a WORSENING one scores 3, a STALLED one 2 (DONE scores nothing: there is nothing left there to win). The
-    graph-for-GNN tune (graph_gnn.py tune) is also due once TUNE_EVERY passes go by without one. The picks come ranked, each
+    graph-for-GNN tune (graph_gnn.py tune) is also due once TUNE_EVERY passes go by without one, but only on a project whose passes
+    measured the GNN: off by default, because it is unproven (owner, 10-31: it may work on large projects with well-defined requirements). The picks come ranked, each
     with the trend lines that chose it, so the choice can be argued with."""
 
     AREAS = [
@@ -457,6 +458,8 @@ class NextImprovement(object):
             score = max([self.SCORE.get(t.verdict(), 0) for t in trends] or [0])
             why = [t.line() for t in trends if self.SCORE.get(t.verdict())]
             if area == "graph-for-gnn":
+                if not any(value(r, "gnn") is not None for r in self.rows):
+                    continue
                 last_n = self.rows[-1].get("n", len(self.rows)) if self.rows else 0
                 tuned = max([t.get("pass", 0) for t in self.tunes] or [0])
                 if last_n - tuned >= self.TUNE_EVERY or not self.tunes:
@@ -665,14 +668,16 @@ def selftest():
               "two-pass stat too few %s" % ("PASS" if good else "FAIL"))
         hp = NextImprovement([{"n": 1, "holes_ours": 3}]).picks()
         fp = NextImprovement([{"n": 1}], fired=[{"id": "IMP-8", "area": "speed", "detail": "idle 5"}]).picks()
-        good_h = hp and hp[0]["area"] == "tests" and "3 holes of ours" in hp[0]["why"][0] and any(p["area"] == "graph-for-gnn" for p in hp) \
-            and [p["area"] for p in NextImprovement([{"n": 1, "holes_ours": 0}]).picks()] == ["graph-for-gnn"] \
+        good_h = hp and hp[0]["area"] == "tests" and "3 holes of ours" in hp[0]["why"][0] and not any(p["area"] == "graph-for-gnn" for p in hp) \
+            and NextImprovement([{"n": 1, "holes_ours": 0}]).picks() == [] \
+            and [p["area"] for p in NextImprovement([{"n": 1, "holes_ours": 0, "gnn_mrr": {"gnn": 0.7}}]).picks()] == ["graph-for-gnn"] \
             and fp[0]["area"] == "speed" and fp[0]["score"] == NextImprovement.FIRED and "IMP-8 fired" in fp[0]["why"][-1] \
             and "most in" not in hp[0]["why"][0] \
             and "48 holes of ours standing in the last pass, most in L13 (27)" == NextImprovement(
                 [{"n": 1, "holes_ours": 48, "holes": {"L1": [0, 9, 9], "L13": [27, 0, 43], "L15": [21, 0, 2]}}]).picks()[0]["why"][0]
         ok &= bool(good_h)
-        print("selftest: HOLES FIRST a hole of ours puts the tests first with its count, the others keep theirs; none changes nothing; a "
+        print("selftest: GNN OFF a project whose passes never measured the GNN is not asked to tune it, and one that did is; "
+              "HOLES FIRST a hole of ours puts the tests first with its count, the others keep theirs; none changes nothing; a "
               "fired improvement trigger lifts the area it names %s" % ("PASS" if good_h else "FAIL"))
         picks = NextImprovement(rows, [{"pass": 5}]).picks()
         areas = [p["area"] for p in picks]
